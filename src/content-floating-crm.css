@@ -1,0 +1,33 @@
+/* Solo content script LinkedIn — mai caricato nel sidepanel. */
+
+/* CRM: floating button, slightly above the messaging bar */
+#ai-crm-floating-btn {
+  position: fixed !important;
+  bottom: 80px !important; /* above the ~60px messaging bar */
+  right: 24px !important;
+  z-index: 9999 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 48px !important;
+  height: 48px !important;
+  border-radius: 12px !important;
+  background-color: #f3f1ff !important;
+  color: #7a5af8 !important;
+  border: 1px solid #d9d2ff !important;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(18, 20, 43, 0.12) !important;
+  transition: background-color 0.2s, border-color 0.2s, transform 0.2s !important;
+}
+
+#ai-crm-floating-btn:hover {
+  background-color: #ece7ff !important;
+  border-color: #c9beff !important;
+  transform: translateY(-1px) !important;
+}
+
+#ai-crm-floating-btn.ln-crm-float--hidden {
+  display: none !important;
+}

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "LinkedIn AI Tool",
+  "version": "1.0.0",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": ["src/content/index.ts"],
+      "matches": [
+        "https://www.linkedin.com/*",
+        "https://www.linkedin.com/preload/*"
+      ],
+      "all_frames": true
+    }
+  ],
+  "permissions": ["storage", "activeTab", "sidePanel", "scripting", "webNavigation"],
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open LinkedIn CRM"
+  },
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "http://localhost:5173/*",
+    "https://*.supabase.co/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' http://localhost:5173; object-src 'self'"
+  }
+}

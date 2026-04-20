@@ -1,0 +1,22 @@
+{
+  "name": "linkedin-ext-ts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.7",
+    "lucide-react": "^0.344.0"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.0.0",
+    "@types/chrome": "^0.0.260",
+    "@types/node": "^20.11.20",
+    "typescript": "^5.2.2",
+    "vite": "^5.1.4"
+  }
+}

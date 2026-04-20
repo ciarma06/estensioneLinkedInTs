@@ -1,0 +1,28 @@
+{
+  "deno.enable": true, // <--- Aggiunta questa per attivare l'estensione
+  "deno.enablePaths": [
+    "supabase/functions"
+  ],
+  "deno.lint": true,
+  "deno.unstable": [
+    "bare-node-builtins",
+    "byonm",
+    "sloppy-imports",
+    "unsafe-proto",
+    "webgpu",
+    "broadcast-channel",
+    "worker-options",
+    "cron",
+    "kv",
+    "ffi",
+    "fs",
+    "http",
+    "net"
+  ],
+  // Applica il formatter Deno solo ai file dentro la cartella delle funzioni
+  "[typescript]": {
+    "editor.defaultFormatter": "denoland.vscode-deno"
+  },
+  // Per evitare che VS Code segnali errori di importazione nei file del Content Script (Chrome)
+  "typescript.tsdk": "node_modules/typescript/lib"
+}

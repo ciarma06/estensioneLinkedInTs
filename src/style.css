@@ -1,0 +1,188 @@
+/* src/style.css */
+
+/* Stile testuale come Consiglia / Rispondi (niente box Art Deco).
+   I <button> hanno spesso font ridotto (UA / “font: button”): va forzata la size come nel feed. */
+.ln-save-btn {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  min-height: unset;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: inherit;
+  /* Fallback: la size effettiva viene impostata in JS da Rispondi (getComputedStyle + !important) */
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  letter-spacing: normal;
+  color: rgba(0, 0, 0, 0.75) !important;
+  vertical-align: baseline;
+}
+
+.ln-save-btn:hover {
+  background: transparent !important;
+  color: rgba(0, 0, 0, 0.75);
+}
+
+.ln-save-btn:active {
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.ln-save-btn:focus {
+  outline: none;
+}
+
+.ln-save-btn:focus-visible {
+  outline: 2px solid #0a66c2;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.ln-save-btn__text {
+  display: inline;
+}
+
+/* Barra commenti con classi CSS hash (nuovo DOM LinkedIn): wrap dopo "Rispondi" */
+.ln-save-inline-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 14px;
+}
+
+/* Divisore verticale: sia legacy BEM sia layout nuovo */
+.comments-comment-social-bar__vertical-divider,
+.ln-save-divider {
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  height: 16px;
+  margin: 0 8px;
+  align-self: center;
+  flex-shrink: 0;
+  width: 0;
+  padding: 0;
+  border-top: none;
+  border-bottom: none;
+  border-left: none;
+}
+
+/* --- Messaggistica: larghezza header (come layout storico) --- */
+.msg-overlay-list-bubble,
+.msg-overlay-conversation-bubble {
+  width: 450px !important;
+  max-width: 90vw !important;
+}
+
+.msg-overlay-bubble-header {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+}
+
+.msg-overlay-bubble-header__controls {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  flex-shrink: 0 !important;
+  gap: 4px !important;
+}
+
+.msg-overlay-bubble-header__details {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  margin-right: 10px !important;
+}
+
+.msg-overlay-bubble-header__title {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+}
+
+/* LinkedIn Messaging: "Generate with AI" button */
+
+.ln-ai-generate-btn-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-right: 8px; /* space before Send */
+}
+
+.ln-ai-generate-btn.artdeco-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.ln-ai-generate-btn .artdeco-button__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ln-ai-dropdown__caret {
+  font-size: 10px;
+  margin-left: 2px;
+  opacity: 0.75;
+}
+
+.ln-ai-dropdown {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  min-width: 220px;
+  padding: 6px 0;
+  margin: 0;
+  z-index: 10050;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(4px);
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s;
+  pointer-events: none;
+}
+
+.ln-ai-dropdown.ln-ai-dropdown--open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.ln-ai-dropdown__item {
+  display: block !important;
+  width: 100%;
+  text-align: left !important;
+  border-radius: 0 !important;
+  border: none !important;
+  padding: 10px 14px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: rgba(0, 0, 0, 0.9) !important;
+  background: transparent !important;
+  cursor: pointer;
+  line-height: 1.3;
+}
+
+.ln-ai-dropdown__item:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+}
+
+.ln-ai-dropdown__item:focus-visible {
+  outline: 2px solid #0a66c2;
+  outline-offset: -2px;
+}

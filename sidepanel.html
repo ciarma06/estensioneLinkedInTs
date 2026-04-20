@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinkedIn Lead Library</title>
+</head>
+<body style="background-color: #f3f2ef; padding: 16px; margin: 0; font-family: system-ui, sans-serif;">
+
+  <!-- Auth: email input -->
+  <div id="screen-login">
+    <h2 style="color:#6d47f5;">Linky Assistant</h2>
+    <p>Inserisci la tua email per ricevere un codice di accesso.</p>
+    <form id="auth-email-form">
+      <label for="auth-email-input" class="sr-only">Email</label>
+      <input id="auth-email-input" type="email" placeholder="La tua email" autocomplete="email" required class="crm-auth-input" />
+      <p id="auth-email-error" style="display:none; color:#c0392b;" role="alert"></p>
+      <button id="auth-email-submit" type="submit" class="crm-btn crm-btn--primary" style="width:100%;margin-top:8px;">Invia codice</button>
+    </form>
+  </div>
+
+  <!-- Auth: OTP input -->
+  <div id="screen-otp" style="display:none">
+    <h2 style="color:#6d47f5;">Controlla la tua email</h2>
+    <p>Se l'indirizzo è registrato, ti abbiamo inviato un codice a 6 cifre. Valido 10 minuti.</p>
+    <form id="auth-otp-form">
+      <label for="auth-otp-input" class="sr-only">Codice</label>
+      <input id="auth-otp-input" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" autocomplete="one-time-code" required class="crm-auth-input crm-auth-input--otp" />
+      <p id="auth-otp-error" style="display:none; color:#c0392b;" role="alert"></p>
+      <button id="auth-otp-submit" type="submit" class="crm-btn crm-btn--primary" style="width:100%;margin-top:8px;">Verifica</button>
+      <button id="auth-otp-back" type="button" class="crm-btn" style="width:100%;margin-top:6px;">Indietro</button>
+    </form>
+  </div>
+
+  <!-- Auth: expired -->
+  <div id="screen-expired" style="display:none">
+    <h2 style="color:#6d47f5;">Accesso scaduto</h2>
+    <p id="expired-message"></p>
+    <a id="purchase-link" href="" target="_blank" rel="noopener" class="crm-btn crm-btn--primary" style="display:inline-block;text-align:center;text-decoration:none;width:100%;margin-top:8px;">Acquista accesso</a>
+    <button id="expired-logout" type="button" class="crm-btn" style="width:100%;margin-top:6px;">Usa un'altra email</button>
+  </div>
+
+  <!-- Main app (hidden until authenticated) -->
+  <div id="app-main" style="display:none">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0; color: #6d47f5;">Lead Library</h2>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button id="refresh-btn" style="cursor: pointer; padding: 6px 10px; border-radius: 10px; border: 1px solid #d9d2ff; background: #f3efff; color: #6d47f5;">🔄</button>
+        <button id="auth-logout-btn" class="crm-btn crm-btn--ghost" type="button" style="font-size:11px;color:#6d47f5;">Esci</button>
+      </div>
+    </div>
+
+    <section id="crm-settings" class="crm-settings" aria-label="AI message settings">
+      <h3 class="crm-settings__title">Who you are (value proposition)</h3>
+      <p class="crm-settings__hint">Used for AI generation on LinkedIn. 1–2 lines: what you do and for whom.</p>
+      <textarea id="ln-value-prop" class="crm-settings__textarea" rows="3" placeholder="e.g. We help B2B SMBs with…"></textarea>
+      <h3 class="crm-settings__title">AI instructions</h3>
+      <p class="crm-settings__hint">Optional. Extra guidelines you want the AI to follow for your messages (tone, style, dos & don'ts).</p>
+      <textarea id="ln-ai-instructions" class="crm-settings__textarea" rows="3" placeholder="e.g. Keep messages under 60 words, no hard selling, focus on peer-to-peer tone…"></textarea>
+      <label for="ln-target-language" class="crm-settings__label">Message language</label>
+      <select id="ln-target-language" class="crm-settings__select">
+        <option value="Italiano">Italian</option>
+        <option value="Inglese">English</option>
+        <option value="Spagnolo">Spanish</option>
+        <option value="Tedesco">German</option>
+      </select>
+      <button type="button" id="ln-value-prop-save" class="crm-btn crm-btn--primary">Save</button>
+    </section>
+
+    <div id="profiles-list">
+      <p>Loading profiles…</p>
+    </div>
+  </div>
+
+  <script type="module" src="/src/moduli/crm.ts"></script>
+</body>
+</html>
