@@ -42,20 +42,20 @@ export async function requestOtp(email: string): Promise<RequestOtpResult> {
     });
 
     if (res.status === 429) {
-      return { ok: false, message: "Troppi tentativi. Riprova tra un minuto." };
+      return { ok: false, message: "Too many attempts. Please try again in a minute." };
     }
 
     let data: Record<string, unknown>;
     try {
       data = (await res.json()) as Record<string, unknown>;
     } catch {
-      return { ok: false, message: "Risposta non valida dal server." };
+      return { ok: false, message: "Invalid response from server." };
     }
 
     if (data.ok === true) return { ok: true };
-    return { ok: false, message: String(data.error ?? "Errore sconosciuto.") };
+    return { ok: false, message: String(data.error ?? "Unknown error.") };
   } catch {
-    return { ok: false, message: "Errore di connessione. Verifica la tua rete." };
+    return { ok: false, message: "Connection error. Please check your network." };
   }
 }
 
@@ -72,11 +72,11 @@ export async function verifyOtp(email: string, code: string): Promise<VerifyOtpR
     try {
       data = (await res.json()) as Record<string, unknown>;
     } catch {
-      return { access: "error", message: "Risposta non valida dal server." };
+      return { access: "error", message: "Invalid response from server." };
     }
 
     if (res.status === 429) {
-      return { access: "error", message: "Troppi tentativi. Riprova più tardi." };
+      return { access: "error", message: "Too many attempts. Please try again later." };
     }
 
     if (res.status === 403) {
@@ -84,19 +84,19 @@ export async function verifyOtp(email: string, code: string): Promise<VerifyOtpR
       if (access === "expired_premium" || access === "expired_waitlist" || access === "unauthorized") {
         return { access, message: String(data.message ?? "") };
       }
-      return { access: "error", message: String(data.message ?? "Accesso negato.") };
+      return { access: "error", message: String(data.message ?? "Access denied.") };
     }
 
     if (res.status === 400) {
-      return { access: "error", message: String(data.error ?? "Codice non valido.") };
+      return { access: "error", message: String(data.error ?? "Invalid code.") };
     }
 
     if (!res.ok) {
-      return { access: "error", message: String(data.error ?? "Errore del server.") };
+      return { access: "error", message: String(data.error ?? "Server error.") };
     }
 
     if (typeof data.jwt !== "string" || typeof data.access !== "string") {
-      return { access: "error", message: "Risposta incompleta dal server." };
+      return { access: "error", message: "Incomplete response from server." };
     }
 
     const state: AuthState = {
@@ -110,7 +110,7 @@ export async function verifyOtp(email: string, code: string): Promise<VerifyOtpR
 
     return state;
   } catch {
-    return { access: "error", message: "Errore di connessione. Verifica la tua rete." };
+    return { access: "error", message: "Connection error. Please check your network." };
   }
 }
 

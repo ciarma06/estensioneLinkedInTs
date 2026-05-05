@@ -186,3 +186,39 @@
   outline: 2px solid #0a66c2;
   outline-offset: -2px;
 }
+
+/* Nuovo DOM: Save appeso in fondo alla action bar (flex), senza divisore */
+.ln-save-wrap--new {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.ln-save-wrap--new .ln-save-divider {
+  display: none;
+}
+
+/*
+ * Nel nuovo DOM il Reply button è solo-icona: applyTypographyFromReference viene saltato,
+ * quindi i valori inline non sovrascrivono questi. Si forzano qui le dimensioni corrette
+ * per far sembrare il bottone parte naturale della action bar (come "Like", "Reply" testuali
+ * nel feed legacy).
+ */
+.ln-save-wrap--new .ln-save-btn {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  color: rgba(0, 0, 0, 0.6) !important;
+  padding: 4px 0 !important;
+}
+
+.ln-save-wrap--new .ln-save-btn:hover {
+  color: rgba(0, 0, 0, 0.9) !important;
+}
+
+.ln-save-wrap--new .ln-save-btn__text {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  line-height: 1.25 !important;
+  color: inherit !important;
+}

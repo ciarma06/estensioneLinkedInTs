@@ -103,7 +103,7 @@ export const extractProfileFromComment = (commentElement: HTMLElement): LinkedIn
 export const saveToCRM = async (profile: LinkedInProfile) => {
   const auth = await getStoredAuth();
   if (!auth || !isAccessStillValid(auth)) {
-    alert('Accedi a Linky Assistant dal sidepanel per salvare i profili.');
+    alert('Sign in to Linky Assistant from the side panel to save profiles.');
     return;
   }
 
@@ -116,7 +116,7 @@ export const saveToCRM = async (profile: LinkedInProfile) => {
 
   if ('error' in result) {
     if (result.authExpired) {
-      alert('Sessione scaduta, riapri il sidepanel.');
+      alert('Session expired. Please reopen the side panel.');
     } else {
       alert('Could not save: ' + result.error);
     }

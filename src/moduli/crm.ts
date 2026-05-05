@@ -234,7 +234,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function handleAuthExpired() {
     clearAuth();
-    console.warn('[auth] sessione scaduta, re-login richiesto');
+    console.warn('[auth] session expired, re-login required');
     window.location.reload();
   }
 
@@ -242,8 +242,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     const msg = document.getElementById('expired-message')!;
     msg.textContent =
       access === 'expired_waitlist' || access === 'waitlist_trial'
-        ? "Il tuo periodo di prova di 7 giorni è terminato. Acquista l'accesso completo per continuare."
-        : 'Il tuo abbonamento è scaduto. Rinnova per continuare a usare Linky Assistant.';
+        ? "Your 7-day trial has ended. Purchase full access to continue."
+        : 'Your subscription has expired. Renew to keep using Linky Assistant.';
     const link = document.getElementById('purchase-link') as HTMLAnchorElement;
     link.href = import.meta.env.VITE_PURCHASE_URL as string;
     show('expired');
@@ -272,18 +272,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const email = input.value.trim().toLowerCase();
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      errorEl.textContent = 'Inserisci un indirizzo email valido.';
+      errorEl.textContent = 'Please enter a valid email address.';
       errorEl.style.display = 'block';
       return;
     }
 
     btn.disabled = true;
-    btn.textContent = 'Invio in corso…';
+    btn.textContent = 'Sending…';
     errorEl.style.display = 'none';
 
     const result = await requestOtp(email);
     btn.disabled = false;
-    btn.textContent = 'Invia codice';
+    btn.textContent = 'Send code';
 
     if (result.ok) {
       pendingEmail = email;
@@ -303,18 +303,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     const code = input.value.trim();
 
     if (!/^\d{6}$/.test(code)) {
-      errorEl.textContent = 'Il codice deve essere di 6 cifre.';
+      errorEl.textContent = 'The code must be 6 digits.';
       errorEl.style.display = 'block';
       return;
     }
 
     btn.disabled = true;
-    btn.textContent = 'Verifica…';
+    btn.textContent = 'Verifying…';
     errorEl.style.display = 'none';
 
     const result = await verifyOtp(pendingEmail, code);
     btn.disabled = false;
-    btn.textContent = 'Verifica';
+    btn.textContent = 'Verify';
 
     if ('jwt' in result) {
       await saveAuth(result);
@@ -323,10 +323,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else if (result.access === 'expired_premium' || result.access === 'expired_waitlist') {
       showExpiredScreen(result.access);
     } else if (result.access === 'unauthorized') {
-      errorEl.textContent = 'Email non riconosciuta o codice errato.';
+      errorEl.textContent = 'Unrecognised email or incorrect code.';
       errorEl.style.display = 'block';
     } else {
-      errorEl.textContent = result.message || 'Errore di connessione. Riprova.';
+      errorEl.textContent = result.message || 'Connection error. Please try again.';
       errorEl.style.display = 'block';
     }
   });

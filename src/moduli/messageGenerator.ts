@@ -219,7 +219,7 @@ async function onScenarioChosen(
 ) {
   const auth = await getStoredAuth();
   if (!auth || !isAccessStillValid(auth)) {
-    alert('Accedi a Linky Assistant dal sidepanel per generare messaggi.');
+    alert('Sign in to Linky Assistant from the side panel to generate messages.');
     closeMenu(btn, menu);
     return;
   }
@@ -264,7 +264,7 @@ async function onScenarioChosen(
 
     const jwt = await getJwt();
     if (!jwt) {
-      alert('Sessione scaduta. Accedi di nuovo dal sidepanel.');
+      alert('Session expired. Please sign in again from the side panel.');
       closeMenu(btn, menu);
       return;
     }
@@ -289,7 +289,7 @@ async function onScenarioChosen(
       const context = (error as { context?: { status?: number } }).context;
       const status = context?.status;
       if (status === 401 || status === 403) {
-        alert('Sessione scaduta o accesso non valido. Accedi di nuovo dal sidepanel.');
+        alert('Session expired or invalid access. Please sign in again from the side panel.');
         closeMenu(btn, menu);
         return;
       }

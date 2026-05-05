@@ -15,10 +15,28 @@ function queryCommentRoots(root: ParentNode = document): HTMLElement[] {
   return Array.from(root.querySelectorAll<HTMLElement>(COMMENT_ROOT_SELECTOR));
 }
 
-/** Known "Reply" button labels (LinkedIn localized). */
+/** Known "Reply" button labels (LinkedIn localized) — matched against textContent. */
 const REPLY_BUTTON_LABELS = new Set([
   'Rispondi',
   'Reply',
+  'Responder',
+  'Répondre',
+  'Antworten',
+  'Antwoord',
+  'Svar',
+  'Odpowiedz',
+  'Ответить',
+  '回答',
+  '回覆',
+]);
+
+/**
+ * Exact aria-label values for the Reply button in the new icon-only DOM.
+ * Kept separate from REPLY_BUTTON_LABELS to allow independent evolution.
+ */
+const REPLY_ARIA_LABELS_EXACT = new Set([
+  'Reply',
+  'Rispondi',
   'Responder',
   'Répondre',
   'Antworten',
@@ -37,25 +55,85 @@ function normalizeUiText(s: string): string {
 /**
  * Comment action bar: often only hashed CSS classes (no stable comments-comment-social-bar).
  * The stable anchor is the "Reply" / "Rispondi" button.
+ *
+ * Priority (first match wins):
+ *   1. textContent exact match against REPLY_BUTTON_LABELS
+ *   2. aria-label exact match against REPLY_ARIA_LABELS_EXACT
+ *      (skip buttons whose aria-label contains "reactions menu")
+ *   3. aria-label substring match (legacy: "reply to …", "rispondi …", etc.)
+ *   4. Structural fallback: button contains svg#comment-small with no text
  */
 function findReplyActionButton(commentElement: HTMLElement): HTMLButtonElement | null {
   const buttons = commentElement.querySelectorAll('button');
   for (const btn of buttons) {
+    // 1. textContent exact match
     const label = normalizeUiText(btn.textContent ?? '');
     if (REPLY_BUTTON_LABELS.has(label)) return btn;
-    const aria = (btn.getAttribute('aria-label') ?? '').toLowerCase();
+
+    const ariaRaw = btn.getAttribute('aria-label') ?? '';
+    const ariaLower = ariaRaw.toLowerCase();
+
+    // Exclude the "Open reactions menu" chevron button
+    if (ariaLower.includes('reactions menu')) continue;
+
+    // 2. aria-label exact match (new icon-only Reply button)
+    if (REPLY_ARIA_LABELS_EXACT.has(normalizeUiText(ariaRaw))) return btn;
+
+    // 3. aria-label substring match (legacy patterns)
     if (
-      aria &&
-      aria.length < 120 &&
-      (aria.includes('reply to') ||
-        aria.includes('respond') ||
-        aria.includes('rispondi') ||
-        aria.includes('répondre'))
+      ariaRaw &&
+      ariaLower.length < 120 &&
+      (ariaLower.includes('reply to') ||
+        ariaLower.includes('respond') ||
+        ariaLower.includes('rispondi') ||
+        ariaLower.includes('répondre'))
+    ) {
+      return btn;
+    }
+
+    // 4. Structural fallback: icon-only Reply identified by svg#comment-small
+    if (
+      btn.querySelector('svg#comment-small') !== null &&
+      normalizeUiText(btn.textContent ?? '') === ''
     ) {
       return btn;
     }
   }
   return null;
+}
+
+/**
+ * New DOM: locate the action bar that contains the Reply button.
+ *
+ * Structure (new hashed-class feed):
+ *   <div class="...">                     ← ACTION BAR
+ *     <div class="...">                   ← reaction wrapper
+ *       <div role="button">…</div>
+ *       <button aria-label="Open reactions menu">…</button>
+ *     </div>
+ *     <div class="...">                   ← replyWrapper (direct child of action bar)
+ *       <button aria-label="Reply">…</button>
+ *     </div>
+ *   </div>
+ *
+ * We climb: replyBtn → closest div (replyWrapper) → parentElement (action bar).
+ * Validation: action bar must be inside the comment element and have ≥ 2 div children.
+ */
+function findCommentActionBarNew(
+  commentElement: HTMLElement,
+  replyBtn: HTMLButtonElement,
+): HTMLElement | null {
+  const replyWrapper = replyBtn.closest('div');
+  if (!replyWrapper) return null;
+  const actionBar = replyWrapper.parentElement;
+  if (!actionBar || !(actionBar instanceof HTMLElement)) return null;
+  if (!commentElement.contains(actionBar)) return null;
+  const directDivChildren = Array.from(actionBar.children).filter(
+    (c): c is HTMLElement => c.tagName === 'DIV',
+  );
+  if (directDivChildren.length < 2) return null;
+  if (!directDivChildren.includes(replyWrapper)) return null;
+  return actionBar;
 }
 
 /** Legacy DOM (LinkedIn BEM classes) before hashed CSS. */
@@ -125,47 +203,45 @@ function buildSaveButton(commentElement: HTMLElement): HTMLButtonElement {
 }
 
 const injectSaveButton = (commentElement: HTMLElement) => {
-  if (commentElement.querySelector('.ln-save-btn')) return;
-
-  const replyBtn = findReplyActionButton(commentElement);
-  if (replyBtn?.parentElement) {
-    const replyWrapper = replyBtn.parentElement;
-    if (replyWrapper.nextElementSibling?.classList.contains('ln-save-inline-wrap')) return;
-  }
-
+  // ── LEGACY PATH ──
+  // socialBar has stable BEM class; idempotency checked on the bar itself.
   const socialBar = findCommentSocialBarLegacy(commentElement);
-  if (!replyBtn?.parentElement && !socialBar) return;
-
-  const btn = buildSaveButton(commentElement);
-
-  if (replyBtn?.parentElement) {
-    applyTypographyFromReference(findButtonTypographyLeaf(replyBtn), btn);
-    const replyWrapper = replyBtn.parentElement;
-    const wrap = document.createElement('div');
-    wrap.className = 'ln-save-inline-wrap';
+  if (socialBar) {
+    if (socialBar.querySelector('.ln-save-btn')) return;
+    const btn = buildSaveButton(commentElement);
+    const hashMatch = socialBar.className
+      .toString()
+      .match(/comments-comment-social-bar--([a-z0-9]+)/i);
+    const suffix = hashMatch?.[1] ?? 'cr';
+    const actionGroup = document.createElement('div');
+    actionGroup.className = `comments-comment-social-bar__action-group--${suffix}`;
     const divider = document.createElement('div');
-    divider.className = 'ln-save-divider';
-    divider.setAttribute('role', 'presentation');
-    wrap.appendChild(divider);
-    wrap.appendChild(btn);
-    replyWrapper.insertAdjacentElement('afterend', wrap);
+    divider.className = 'comments-comment-social-bar__vertical-divider ln-save-divider';
+    socialBar.appendChild(divider);
+    socialBar.appendChild(actionGroup);
+    actionGroup.appendChild(btn);
+    const legacyRef = socialBar.querySelector<HTMLButtonElement>('button');
+    if (legacyRef) applyTypographyFromReference(findButtonTypographyLeaf(legacyRef), btn);
     return;
   }
 
-  if (!socialBar) return;
+  // ── NEW DOM PATH ──
+  // No BEM social bar: locate the Reply button and climb to the action bar.
+  const replyBtn = findReplyActionButton(commentElement);
+  if (!replyBtn) return;
+  const actionBar = findCommentActionBarNew(commentElement, replyBtn);
+  if (!actionBar) return;
+  // Idempotency: checked on the action bar to survive partial re-renders.
+  if (actionBar.querySelector('.ln-save-btn')) return;
 
-  const hashMatch = socialBar.className.toString().match(/comments-comment-social-bar--([a-z0-9]+)/i);
-  const suffix = hashMatch?.[1] ?? 'cr';
+  const btn = buildSaveButton(commentElement);
+  // Reply is icon-only in the new DOM: copying its computed styles would give icon-sized
+  // values. Skip applyTypographyFromReference and let the CSS fallbacks take over.
 
-  const actionGroup = document.createElement('div');
-  actionGroup.className = `comments-comment-social-bar__action-group--${suffix}`;
-  const divider = document.createElement('div');
-  divider.className = 'comments-comment-social-bar__vertical-divider ln-save-divider';
-  socialBar.appendChild(divider);
-  socialBar.appendChild(actionGroup);
-  actionGroup.appendChild(btn);
-  const legacyRef = socialBar.querySelector<HTMLButtonElement>('button');
-  if (legacyRef) applyTypographyFromReference(findButtonTypographyLeaf(legacyRef), btn);
+  const wrap = document.createElement('div');
+  wrap.className = 'ln-save-inline-wrap ln-save-wrap--new';
+  wrap.appendChild(btn);
+  actionBar.appendChild(wrap);
 };
 
 const scanAndInject = () => {

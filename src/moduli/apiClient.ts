@@ -43,12 +43,12 @@ async function authedFetch<T>(
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
-    return { error: "Errore di connessione." };
+    return { error: "Connection error." };
   }
 
   if (res.status === 401) {
     await clearAuth();
-    let msg = "Sessione scaduta.";
+    let msg = "Session expired.";
     try {
       const data = (await res.json()) as Record<string, unknown>;
       if (typeof data.error === "string") msg = data.error;
@@ -62,11 +62,11 @@ async function authedFetch<T>(
   try {
     data = (await res.json()) as Record<string, unknown>;
   } catch {
-    return { error: "Risposta non valida dal server." };
+    return { error: "Invalid response from server." };
   }
 
   if (!res.ok) {
-    return { error: String(data.error ?? "Errore del server.") };
+    return { error: String(data.error ?? "Server error.") };
   }
 
   return data as unknown as T;
