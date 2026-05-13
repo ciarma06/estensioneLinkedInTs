@@ -51,13 +51,13 @@ async function sendOtpEmail(email: string, otp: string): Promise<boolean> {
       body: JSON.stringify({
         from: EMAIL_FROM,
         to: email,
-        subject: "Il tuo codice Linky Assistant",
+        subject: "Your Linky Assistant code",
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:400px;margin:0 auto;padding:24px;">
             <h2 style="color:#6d47f5;margin-bottom:8px;">Linky Assistant</h2>
             <p>Il tuo codice di accesso:</p>
             <p style="font-size:32px;font-weight:800;letter-spacing:6px;color:#6d47f5;margin:16px 0;">${otp}</p>
-            <p style="font-size:13px;color:#666;">Scade tra 10 minuti. Non condividere questo codice con nessuno.</p>
+            <p style="font-size:13px;color:#666;">Expires in 10 minutes. Never share this code with anyone.</p>
           </div>
         `,
       }),
