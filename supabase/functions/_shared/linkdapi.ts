@@ -77,11 +77,30 @@ export type LinkdApiPostEngagements = {
   repostsCount?: number;
 };
 
+/**
+ * `postedAt` può arrivare in due forme a seconda dell'endpoint / del
+ * profilo restituito:
+ * - stringa relativa: "7h", "3d", "1mo", "2yr" (formato `/posts/all`
+ *   documentato)
+ * - oggetto strutturato: `{ timestamp, fullDate, relativeDay }`
+ *   (osservato in produzione su `/posts/all`, identico a quello di
+ *   `/comments/all`)
+ *
+ * I consumer DEVONO normalizzare prima di trattarlo come stringa.
+ */
+export type LinkdApiPostedAt =
+  | string
+  | {
+      timestamp?: number;
+      fullDate?: string;
+      relativeDay?: string;
+    };
+
 export type LinkdApiPost = {
   text?: string;
   url?: string;
   urn?: string;
-  postedAt?: string;
+  postedAt?: LinkdApiPostedAt;
   edited?: boolean;
   engagements?: LinkdApiPostEngagements;
 };

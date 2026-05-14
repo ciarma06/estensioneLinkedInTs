@@ -345,12 +345,13 @@ function buildDropdown(): { wrapper: HTMLElement; btn: HTMLButtonElement; menu: 
   btn.type = 'button';
   btn.className =
     'artdeco-button artdeco-button--1 artdeco-button--tertiary artdeco-button--muted ln-ai-generate-btn';
-  btn.setAttribute('aria-label', 'Generate with AI');
+  btn.setAttribute('aria-label', 'Generate with Linky');
   btn.setAttribute('aria-haspopup', 'menu');
   btn.setAttribute('aria-expanded', 'false');
   btn.setAttribute('aria-controls', MENU_ID);
-  btn.title = 'Generate with AI';
-  btn.innerHTML = `<span class="artdeco-button__text"><span aria-hidden="true">✨</span> <span>Generate with AI</span><span class="ln-ai-dropdown__caret" aria-hidden="true">▾</span></span>`;
+  btn.title = 'Generate with Linky';
+  const linkyIconUrl = chrome.runtime.getURL('icons/linky_wizard_icon_no_background.png');
+  btn.innerHTML = `<span class="artdeco-button__text"><img src="${linkyIconUrl}" aria-hidden="true" style="width:16px;height:16px;vertical-align:middle;margin-right:4px;"> <span>Generate with Linky</span><span class="ln-ai-dropdown__caret" aria-hidden="true">▾</span></span>`;
 
   const menu = document.createElement('div');
   menu.id = MENU_ID;

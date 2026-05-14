@@ -30,5 +30,11 @@
   ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' http://localhost:5173; object-src 'self'"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*"],
+      "matches": ["https://www.linkedin.com/*"]
+    }
+  ]
 }

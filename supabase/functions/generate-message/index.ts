@@ -304,6 +304,24 @@ function formatPositionsFromOverview(overview: LinkdApiOverview | null | undefin
   return lines.join("\n");
 }
 
+/**
+ * Normalizza il campo `postedAt` di un post LinkdAPI in una stringa
+ * relativa stampabile ("7h", "3d", "1yr"). Su `/posts/all` può arrivare
+ * sia come stringa diretta sia come oggetto `{ timestamp, fullDate,
+ * relativeDay }` — gestiamo entrambi i casi e ritorniamo "" se non c'è
+ * nulla di utile.
+ */
+function normalizePostedAt(raw: LinkdApiPost["postedAt"]): string {
+  if (typeof raw === "string") return raw.trim();
+  if (raw && typeof raw === "object") {
+    const relativeDay = (raw as { relativeDay?: unknown }).relativeDay;
+    if (typeof relativeDay === "string") return relativeDay.trim();
+    const fullDate = (raw as { fullDate?: unknown }).fullDate;
+    if (typeof fullDate === "string") return fullDate.trim();
+  }
+  return "";
+}
+
 function formatRecentPosts(posts: LinkdApiPost[] | null | undefined): string {
   if (!posts || posts.length === 0) return "";
   const lines: string[] = [];
@@ -312,7 +330,7 @@ function formatRecentPosts(posts: LinkdApiPost[] | null | undefined): string {
     if (lines.length >= POSTS_MAX) break;
     const text = clampText(post.text, POST_MAX_CHARS);
     if (!text) continue;
-    const when = (post.postedAt ?? "").trim();
+    const when = normalizePostedAt(post.postedAt);
     const prefix = when ? `${idx}) [${when}]` : `${idx})`;
     lines.push(`${prefix} ${text}`);
     idx++;
