@@ -1,19 +1,49 @@
+//generate-message/index.ts
+
 /// <reference path="./deno-env.d.ts" />
 
 /**
  * Edge Function: generazione messaggi LinkedIn (solo server: CLAUDE_API_KEY).
+ *
+ * Scenari supportati:
+ * - "pain"    → pain point non ovvio. Per utenti premium plus arricchito con
+ *               bio + ruoli del lead via LinkdAPI.
+ * - "trigger" → basato su commento/post salvato nel CRM. NON usa LinkdAPI.
+ * - "engage"  → basato sui post recenti del lead. Solo premium plus,
+ *               usa SEMPRE LinkdAPI (overview + details + posts).
+ *
  * Body JSON atteso (allineato a messagingContext + Impostazioni estensione):
- * - scenario: "pain" | "founder" | "trigger"
- * - valueProposition: string (obbligatorio) — chi sei / cosa fai (da chrome.storage)
+ * - scenario: "pain" | "trigger" | "engage"
+ * - valueProposition: string (obbligatorio)
  * - leadName, headline, profileUrl: opzionali (header chat)
- * - triggerText, triggerUrl: opzionali (CRM, scenario trigger)
- * - industry: opzionale — settore/fase azienda del lead (es. "SaaS B2B Series A", "fintech regolamentato")
+ * - triggerText, triggerUrl: opzionali (solo scenario trigger)
+ * - industry, targetLanguage, aiInstructions: opzionali
+ *
+ * Response:
+ * - success con enrichment: { message, dataQuality: "enriched" }
+ * - success senza enrichment (engage/pain premium plus con LinkdAPI fallita):
+ *   { message, dataQuality: "limited", dataQualityNote }
+ * - scenari senza enrichment (trigger, pain non premium plus): { message }
  */
 
 import { verifyJwt } from "../_shared/jwt.ts";
 import { resolveAccess } from "../_shared/access.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { checkAndRecord } from "../_shared/rateLimit.ts";
+import { isPremiumPlus } from "../_shared/premiumPlusAllowlist.ts";
+import {
+  extractUsernameFromUrl,
+  getProfileDetails,
+  getProfileOverview,
+  getRecentPosts,
+  type LinkdApiDetails,
+  type LinkdApiOverview,
+  type LinkdApiPost,
+} from "../_shared/linkdapi.ts";
+import {
+  getCachedProfile,
+  setCachedProfile,
+} from "../_shared/linkdapiCache.ts";
 
 const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY");
 const AUTH_JWT_SECRET = Deno.env.get("AUTH_JWT_SECRET");
@@ -50,7 +80,7 @@ const FALLBACK_CLAUDE_MODELS = uniqueModels([
   "claude-3-haiku-20240307",
 ]);
 
-type Scenario = "pain" | "founder" | "trigger";
+type Scenario = "pain" | "trigger" | "engage";
 
 type GenerateBody = {
   scenario?: string;
@@ -63,6 +93,19 @@ type GenerateBody = {
   triggerUrl?: string | null;
   industry?: string | null;
   aiInstructions?: string | null;
+};
+
+/** Dati arricchiti che vengono iniettati nel prompt utente. */
+type EnrichmentData = {
+  bio?: string;
+  positions?: string;
+  recentPosts?: string;
+};
+
+/** Forma dei dati di profilo serializzati in cache (`linkdapi_cache.profile_data`). */
+type CachedProfilePayload = {
+  overview?: LinkdApiOverview;
+  details?: LinkdApiDetails;
 };
 
 const BASE_SYSTEM_PROMPT = `# RUOLO E OBIETTIVO
@@ -105,8 +148,15 @@ Nel primo messaggio NON chiedere call o demo. Solo CTA a basso attrito (sì/no o
 
 # SCENARI (usa SOLO quello indicato nel messaggio utente)
 - pain: saluto, angolo specifico su un problema NON ovvio per quel ruolo/settore (vedi regola sotto), soft CTA priorità.
-- founder: saluto, riconoscimento sincero su traguardo o difficoltà del loro modello, collegamento alla tua esperienza (value proposition), soft CTA confronto.
 - trigger: saluto, sintesi rielaborata del loro punto (NON copiare il testo), insight collegato al tuo lavoro, domanda aperta sul tema.
+- engage: saluto, aggancio diretto su un tema concreto preso dai POST RECENTI del lead (riformulato con parole tue, MAI citazione letterale, MAI elogio al post), insight breve da esperienza diretta, domanda aperta non commerciale.
+
+# USO DEI DATI ARRICCHITI (se presenti)
+Se nel messaggio utente compare il blocco "DATI ARRICCHITI SUL DESTINATARIO" (bio, ruoli, post recenti):
+- Usalo per personalizzare l'angolo del messaggio.
+- NON parafrasare frasi intere della bio o dei post.
+- NON vantarti di "aver letto il profilo", "aver visto il tuo post recente", ecc.
+- Se è presente almeno un post recente e lo scenario è engage, l'apertura DEVE riferirsi al tema concreto di quel post.
 
 # OUTPUT
 Restituisci ESCLUSIVAMENTE il testo del messaggio finale, pronto per incollare su LinkedIn. Nessuna introduzione, nessuna spiegazione, nessun virgolettato attorno al messaggio.`;
@@ -203,10 +253,209 @@ function isModelNotAvailableError(errMsg: string): boolean {
 }
 
 function isScenario(s: string | undefined): s is Scenario {
-  return s === "pain" || s === "founder" || s === "trigger";
+  return s === "pain" || s === "trigger" || s === "engage";
 }
 
-function buildUserInstruction(body: GenerateBody): string {
+// ---------------------------------------------------------------------------
+// Enrichment: formattazione + fetch + cache
+// ---------------------------------------------------------------------------
+
+const BIO_MAX_CHARS = 600;
+const POST_MAX_CHARS = 400;
+const POSITIONS_MAX = 3;
+const POSTS_MAX = 3;
+
+function clampText(text: string | undefined | null, maxChars: number): string {
+  if (!text) return "";
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+  return collapsed.length > maxChars
+    ? `${collapsed.slice(0, maxChars).trimEnd()}…`
+    : collapsed;
+}
+
+function formatPositionsFromDetails(details: LinkdApiDetails | null | undefined): string {
+  if (!details?.positions || details.positions.length === 0) return "";
+  const lines = details.positions
+    .slice(0, POSITIONS_MAX)
+    .map((p) => {
+      const title = (p.jobTitle ?? "").trim();
+      const company = (p.company ?? "").split("·")[0].trim();
+      const duration = (p.duration ?? "").split("·")[0].trim();
+      const parts: string[] = [];
+      if (title) parts.push(title);
+      if (company) parts.push(`@ ${company}`);
+      if (duration) parts.push(`(${duration})`);
+      return parts.length > 0 ? `- ${parts.join(" ")}` : "";
+    })
+    .filter(Boolean);
+  return lines.join("\n");
+}
+
+function formatPositionsFromOverview(overview: LinkdApiOverview | null | undefined): string {
+  if (!overview?.currentPositions || overview.currentPositions.length === 0) return "";
+  const lines = overview.currentPositions
+    .slice(0, 2)
+    .map((p) => {
+      const name = (p.name ?? "").trim();
+      return name ? `- @ ${name}` : "";
+    })
+    .filter(Boolean);
+  return lines.join("\n");
+}
+
+function formatRecentPosts(posts: LinkdApiPost[] | null | undefined): string {
+  if (!posts || posts.length === 0) return "";
+  const lines: string[] = [];
+  let idx = 1;
+  for (const post of posts) {
+    if (lines.length >= POSTS_MAX) break;
+    const text = clampText(post.text, POST_MAX_CHARS);
+    if (!text) continue;
+    const when = (post.postedAt ?? "").trim();
+    const prefix = when ? `${idx}) [${when}]` : `${idx})`;
+    lines.push(`${prefix} ${text}`);
+    idx++;
+  }
+  return lines.join("\n");
+}
+
+function buildPainEnrichment(
+  overview: LinkdApiOverview | null,
+  details: LinkdApiDetails | null,
+): EnrichmentData | null {
+  const bio = clampText(details?.about, BIO_MAX_CHARS);
+  const positions =
+    formatPositionsFromDetails(details) || formatPositionsFromOverview(overview);
+  if (!bio && !positions) return null;
+  return {
+    bio: bio || undefined,
+    positions: positions || undefined,
+  };
+}
+
+function buildEngageEnrichment(
+  overview: LinkdApiOverview | null,
+  details: LinkdApiDetails | null,
+  posts: LinkdApiPost[] | null,
+): EnrichmentData | null {
+  const bio = clampText(details?.about, BIO_MAX_CHARS);
+  const positions =
+    formatPositionsFromDetails(details) || formatPositionsFromOverview(overview);
+  const recentPosts = formatRecentPosts(posts);
+  if (!bio && !positions && !recentPosts) return null;
+  return {
+    bio: bio || undefined,
+    positions: positions || undefined,
+    recentPosts: recentPosts || undefined,
+  };
+}
+
+/**
+ * Per scenario `pain` premium plus: overview + details (no posts).
+ * Cache hit se profile_data è popolato. posts_data può essere null o popolato:
+ * non lo usiamo qui.
+ */
+async function fetchEnrichmentForPain(
+  supabaseUrl: string,
+  serviceKey: string,
+  linkedinUrl: string,
+): Promise<EnrichmentData | null> {
+  const cached = await getCachedProfile(supabaseUrl, serviceKey, linkedinUrl);
+  if (cached?.profileData) {
+    const cachedProfile = cached.profileData as CachedProfilePayload;
+    return buildPainEnrichment(
+      cachedProfile.overview ?? null,
+      cachedProfile.details ?? null,
+    );
+  }
+
+  const username = extractUsernameFromUrl(linkedinUrl);
+  if (!username) return null;
+
+  const overview = await getProfileOverview(username);
+  if (!overview) return null;
+
+  const details = await getProfileDetails(overview.urn);
+
+  const profilePayload: CachedProfilePayload = { overview, details: details ?? undefined };
+  // posts_data resta null: per il pain non ci servono, e l'eventuale
+  // chiamata engage successiva farà cache miss su posts_data e rifarà il fetch.
+  await setCachedProfile(supabaseUrl, serviceKey, linkedinUrl, profilePayload, null);
+
+  return buildPainEnrichment(overview, details);
+}
+
+/**
+ * Per scenario `engage`: overview + details + recent posts (sempre).
+ * Cache hit solo se sia profile_data sia posts_data sono popolati
+ * (altrimenti rifacciamo il fetch per garantire la presenza dei post).
+ */
+async function fetchEnrichmentForEngage(
+  supabaseUrl: string,
+  serviceKey: string,
+  linkedinUrl: string,
+): Promise<EnrichmentData | null> {
+  const cached = await getCachedProfile(supabaseUrl, serviceKey, linkedinUrl);
+  if (cached?.profileData && cached?.postsData !== null && cached?.postsData !== undefined) {
+    const cachedProfile = cached.profileData as CachedProfilePayload;
+    const cachedPosts = Array.isArray(cached.postsData)
+      ? (cached.postsData as LinkdApiPost[])
+      : [];
+    return buildEngageEnrichment(
+      cachedProfile.overview ?? null,
+      cachedProfile.details ?? null,
+      cachedPosts,
+    );
+  }
+
+  const username = extractUsernameFromUrl(linkedinUrl);
+  if (!username) return null;
+
+  const overview = await getProfileOverview(username);
+  if (!overview) return null;
+
+  const [details, posts] = await Promise.all([
+    getProfileDetails(overview.urn),
+    getRecentPosts(overview.urn),
+  ]);
+
+  const profilePayload: CachedProfilePayload = { overview, details: details ?? undefined };
+  await setCachedProfile(
+    supabaseUrl,
+    serviceKey,
+    linkedinUrl,
+    profilePayload,
+    posts ?? [],
+  );
+
+  return buildEngageEnrichment(overview, details, posts);
+}
+
+// ---------------------------------------------------------------------------
+// Prompt utente
+// ---------------------------------------------------------------------------
+
+function formatEnrichmentBlock(enrichment: EnrichmentData | null): string {
+  if (!enrichment) return "";
+  const fragments: string[] = [];
+  if (enrichment.bio) {
+    fragments.push(`- Bio: ${enrichment.bio}`);
+  }
+  if (enrichment.positions) {
+    fragments.push(`- Percorso/ruoli rilevanti:\n${enrichment.positions}`);
+  }
+  if (enrichment.recentPosts) {
+    fragments.push(`- Post recenti pubblicati dal lead:\n${enrichment.recentPosts}`);
+  }
+  if (fragments.length === 0) return "";
+  return `\n\nDATI ARRICCHITI SUL DESTINATARIO (fonte privilegiata di contesto — non citare frasi alla lettera, non vantarti di "aver studiato il profilo"):\n${fragments.join("\n")}`;
+}
+
+function buildUserInstruction(
+  body: GenerateBody,
+  enrichment: EnrichmentData | null = null,
+): string {
   const scenario = body.scenario as Scenario;
   const vp = (body.valueProposition ?? "").trim();
   const name = (body.leadName ?? "").trim() || "Destinatario";
@@ -226,7 +475,7 @@ ${vp}
 DESTINATARIO
 - Nome (se noto): ${name}
 - Headline / ruolo visibile in chat: ${headline}
-- URL profilo (se noto): ${profileUrl}${industryLine ? `\n${industryLine}` : ""}`;
+- URL profilo (se noto): ${profileUrl}${industryLine ? `\n${industryLine}` : ""}${formatEnrichmentBlock(enrichment)}`;
 
   if (scenario === "pain") {
     return `${base}
@@ -245,12 +494,17 @@ ${industryLine ? `\nTieni conto del settore/fase indicato per rendere il pain po
 Genera il messaggio: apri direttamente sull'angolo specifico (senza build-up), parla dalla tua esperienza diretta, chiudi con soft CTA per capire se è una priorità.`;
   }
 
-  if (scenario === "founder") {
+  if (scenario === "engage") {
     return `${base}
 
-SCENARIO DA APPLICARE: FOUNDER TO FOUNDER
-Genera un messaggio secondo il framework founder: saluto, riconoscimento breve e sincero (traguardo o difficoltà plausibile dato l'headline${industry ? ` e il settore "${industry}"` : ""}), collegamento alla value proposition di chi scrive, soft CTA per un confronto (senza proporre call).
-Parla sempre da esperienza diretta, mai da osservatore esterno del settore.`;
+SCENARIO DA APPLICARE: ENGAGE (post recenti del lead)
+
+REGOLA CRITICA — USO DEI POST RECENTI:
+Apri il messaggio direttamente su un tema concreto preso dai post recenti elencati nel blocco "DATI ARRICCHITI" sopra. Riformula con parole tue: NIENTE citazioni letterali, NIENTE elogi al post ("ottimo punto", "interessante", "ti ho letto", "ho visto il tuo post"), NIENTE riassunti del post.
+Se i post recenti sono di natura promozionale o celebrativa (annunci, achievement aziendali, ringraziamenti), evita di commentarli direttamente: pesca un sotto-tema operativo o un'ipotesi concreta dietro al post.
+Se nel blocco arricchito non ci sono post recenti utilizzabili, ripiega sulla bio o sui ruoli per trovare un angolo specifico — ma non inventare contenuti di post.
+
+Genera il messaggio: hook diretto sul tema, aggancio dalla TUA esperienza (peer-to-peer, mai osservatore esterno del settore), domanda aperta non commerciale.`;
   }
 
   // trigger
@@ -270,30 +524,39 @@ Genera un messaggio secondo il framework trigger: saluto, sintesi rielaborata de
 Non aprire con una statistica o una verità universale: parti dall'angolo specifico del loro commento/post.`;
 }
 
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+function jsonResponse(body: Record<string, unknown>, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+const DATA_QUALITY_LIMITED_NOTE =
+  "Dati profilo limitati: messaggio generato con contesto base.";
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method not allowed" }), {
-      status: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: "Method not allowed" }, 405);
   }
 
   if (!CLAUDE_API_KEY) {
-    return new Response(
-      JSON.stringify({ error: "Server: CLAUDE_API_KEY not configured" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Server: CLAUDE_API_KEY not configured" }, 500);
   }
 
   if (!AUTH_JWT_SECRET || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    return new Response(
-      JSON.stringify({ error: "Server: auth secrets not configured" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Server: auth secrets not configured" }, 500);
   }
 
   // --- JWT custom validation ---
@@ -301,30 +564,24 @@ Deno.serve(async (req) => {
     req.headers.get("x-supabase-authorization") ?? req.headers.get("authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (!token) {
-    return new Response(
-      JSON.stringify({ error: "Missing authentication token" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Missing authentication token" }, 401);
   }
 
   const jwtPayload = await verifyJwt(token, AUTH_JWT_SECRET);
   if (!jwtPayload) {
-    return new Response(
-      JSON.stringify({ error: "Invalid or expired token" }),
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Invalid or expired token" }, 401);
   }
 
   // --- Access check ---
   const accessResult = await resolveAccess(jwtPayload.email, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   if (!("daysLeft" in accessResult)) {
-    return new Response(
-      JSON.stringify({ error: "Access denied", access: accessResult.access }),
-      { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    return jsonResponse(
+      { error: "Access denied", access: accessResult.access },
+      403,
     );
   }
 
-  // --- Rate limiting: 20 calls/hour per email ---
+  // --- Rate limiting globale: 20 calls/hour per email ---
   const rateCheck = await checkAndRecord({
     supabaseUrl: SUPABASE_URL,
     serviceKey: SUPABASE_SERVICE_ROLE_KEY,
@@ -334,10 +591,7 @@ Deno.serve(async (req) => {
     windowSeconds: 3600,
   });
   if (!rateCheck.allowed) {
-    return new Response(
-      JSON.stringify({ error: "Rate limit exceeded. Try again later." }),
-      { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-    );
+    return jsonResponse({ error: "Rate limit exceeded. Try again later." }, 429);
   }
 
   try {
@@ -345,34 +599,89 @@ Deno.serve(async (req) => {
     try {
       raw = (await req.json()) as GenerateBody;
     } catch {
-      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse({ error: "Invalid JSON body" }, 400);
     }
 
     if (!isScenario(raw.scenario)) {
-      return new Response(
-        JSON.stringify({
-          error: 'Required field "scenario": "pain" | "founder" | "trigger"',
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      return jsonResponse(
+        {
+          error: 'Required field "scenario": "pain" | "trigger" | "engage"',
+        },
+        400,
       );
     }
 
     const valueProposition = (raw.valueProposition ?? "").trim();
     if (!valueProposition) {
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           error:
             'Required field "valueProposition": set your value proposition in the extension CRM settings.',
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        },
+        400,
       );
     }
 
+    const scenario = raw.scenario;
+    const profileUrl = (raw.profileUrl ?? "").trim();
+    const premiumPlus = isPremiumPlus(jwtPayload.email);
+
+    // --- Enrichment logic per scenario ---
+    let enrichment: EnrichmentData | null = null;
+    let enrichmentAttempted = false;
+
+    if (scenario === "engage") {
+      if (!premiumPlus) {
+        return jsonResponse({ error: "Engage richiede premium plus." }, 403);
+      }
+
+      // Rate limit aggiuntivo per engage: 10/h
+      const engageRate = await checkAndRecord({
+        supabaseUrl: SUPABASE_URL,
+        serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+        email: jwtPayload.email,
+        action: "generate_message_engage",
+        maxPerWindow: 10,
+        windowSeconds: 3600,
+      });
+      if (!engageRate.allowed) {
+        return jsonResponse(
+          { error: "Engage rate limit exceeded. Try again later." },
+          429,
+        );
+      }
+
+      enrichmentAttempted = true;
+      if (profileUrl) {
+        try {
+          enrichment = await fetchEnrichmentForEngage(
+            SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY,
+            profileUrl,
+          );
+        } catch (e) {
+          console.warn("[generate-message] engage enrichment failed:", e);
+          enrichment = null;
+        }
+      }
+    } else if (scenario === "pain" && premiumPlus) {
+      enrichmentAttempted = true;
+      if (profileUrl) {
+        try {
+          enrichment = await fetchEnrichmentForPain(
+            SUPABASE_URL,
+            SUPABASE_SERVICE_ROLE_KEY,
+            profileUrl,
+          );
+        } catch (e) {
+          console.warn("[generate-message] pain enrichment failed:", e);
+          enrichment = null;
+        }
+      }
+    }
+
     const targetLanguage = parseTargetLanguage(raw.targetLanguage);
-    const userBlock = buildUserInstruction({ ...raw, valueProposition });
+    const userBlock = buildUserInstruction({ ...raw, valueProposition }, enrichment);
 
     const rawInstructions = typeof raw.aiInstructions === "string" ? raw.aiInstructions : "";
     const cleanInstructions = sanitizeAiInstructions(rawInstructions);
@@ -401,19 +710,19 @@ Deno.serve(async (req) => {
     }
 
     if (!response || !data) {
-      return new Response(
-        JSON.stringify({ error: "Anthropic: invalid response from provider" }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      return jsonResponse(
+        { error: "Anthropic: invalid response from provider" },
+        502,
       );
     }
 
     if (!response.ok) {
       const errMsg = lastErr || getAnthropicErrorMessage(data);
-      return new Response(
-        JSON.stringify({
+      return jsonResponse(
+        {
           error: `Anthropic: ${errMsg}. Check CLAUDE_MODEL or use a model supported on your account.`,
-        }),
-        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        },
+        502,
       );
     }
 
@@ -425,20 +734,25 @@ Deno.serve(async (req) => {
         : "";
 
     if (!text) {
-      return new Response(JSON.stringify({ error: `Empty or unexpected model response (${usedModel})` }), {
-        status: 502,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return jsonResponse(
+        { error: `Empty or unexpected model response (${usedModel})` },
+        502,
+      );
     }
 
-    return new Response(JSON.stringify({ message: text }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    const responseBody: Record<string, unknown> = { message: text };
+    if (enrichmentAttempted) {
+      if (enrichment) {
+        responseBody.dataQuality = "enriched";
+      } else {
+        responseBody.dataQuality = "limited";
+        responseBody.dataQualityNote = DATA_QUALITY_LIMITED_NOTE;
+      }
+    }
+
+    return jsonResponse(responseBody);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ error: errorMessage }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return jsonResponse({ error: errorMessage }, 500);
   }
 });

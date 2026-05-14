@@ -1,3 +1,5 @@
+//messageGenerator.ts
+
 import { getMessagingContext, type MessageScenario } from './messagingContext';
 import { getTargetLanguage, getUserInstructions, getValueProposition } from './userSettings';
 import { insertAiMessageIntoComposerNear } from './messageComposer';
@@ -24,8 +26,8 @@ const WRAPPER_CLASS = 'ln-ai-generate-btn-wrapper';
 
 const SCENARIO_OPTIONS: { scenario: MessageScenario; label: string }[] = [
   { scenario: 'pain', label: 'Pain point' },
-  { scenario: 'founder', label: 'Founder → Founder' },
   { scenario: 'trigger', label: 'Trigger (post/comment)' },
+  { scenario: 'engage', label: 'Engage (recent posts)' },
 ];
 
 let menuOpen = false;
@@ -296,13 +298,27 @@ async function onScenarioChosen(
       throw new Error(msg);
     }
 
-    const payload = data as { message?: string; error?: string } | null;
+    const payload = data as {
+      message?: string;
+      error?: string;
+      dataQuality?: 'enriched' | 'limited';
+      dataQualityNote?: string;
+    } | null;
     if (payload?.error) {
       throw new Error(payload.error);
     }
     const aiMessage = payload?.message?.trim();
     if (!aiMessage) {
       throw new Error('Server response without a message.');
+    }
+
+    if (payload?.dataQuality === 'limited') {
+      console.warn(
+        '[LN-EXT] generate-message: dataQuality=limited',
+        payload.dataQualityNote ?? '',
+      );
+    } else if (payload?.dataQuality === 'enriched') {
+      console.info('[LN-EXT] generate-message: dataQuality=enriched');
     }
 
     const inserted = insertAiMessageIntoComposerNear(aiMessage, btn);

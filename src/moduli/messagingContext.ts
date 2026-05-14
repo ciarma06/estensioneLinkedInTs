@@ -1,8 +1,13 @@
 // src/moduli/messagingContext.ts
 import { apiSearchProfile, type Profile } from './apiClient';
 
-/** Allineato ai 3 framework in .cursorrules */
-export type MessageScenario = 'pain' | 'founder' | 'trigger';
+/**
+ * Allineato ai 3 framework supportati dall'Edge Function `generate-message`.
+ * - pain    → pain point non ovvio (arricchito con LinkdAPI per premium plus)
+ * - trigger → basato su commento/post salvato (no LinkdAPI)
+ * - engage  → basato sui post recenti del lead (LinkdAPI sempre, solo premium plus)
+ */
+export type MessageScenario = 'pain' | 'trigger' | 'engage';
 
 export type MessagingHeaderContext = {
   leadName: string | null;
