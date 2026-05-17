@@ -1,40 +1,57 @@
 {
   "manifest_version": 3,
-  "name": "LinkedIn AI Tool",
+  "name": "LinkyAssistant — Outreach Tool for LinkedIn",
   "version": "1.0.0",
   "background": {
-    "service_worker": "src/background/index.ts",
+    "service_worker": "service-worker-loader.js",
     "type": "module"
   },
   "content_scripts": [
     {
-      "js": ["src/content/index.ts"],
+      "js": [
+        "assets/index.ts-loader-_-Gv0xmO.js"
+      ],
       "matches": [
         "https://www.linkedin.com/*",
         "https://www.linkedin.com/preload/*"
       ],
-      "all_frames": true
+      "all_frames": true,
+      "css": [
+        "assets/index-YNQ0MAYx.css"
+      ]
     }
   ],
-  "permissions": ["storage", "activeTab", "sidePanel", "scripting", "webNavigation"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "sidePanel",
+    "scripting",
+    "webNavigation"
+  ],
   "side_panel": {
     "default_path": "sidepanel.html"
   },
   "action": {
-    "default_title": "Open LinkedIn CRM"
+    "default_title": "Open LinkyAssistant"
   },
   "host_permissions": [
     "https://www.linkedin.com/*",
-    "http://localhost:5173/*",
     "https://*.supabase.co/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' http://localhost:5173; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'"
   },
   "web_accessible_resources": [
     {
-      "resources": ["icons/*"],
-      "matches": ["https://www.linkedin.com/*"]
+      "matches": [
+        "https://www.linkedin.com/*"
+      ],
+      "resources": [
+        "assets/vendor-user-settings-CmUqY8sO.js",
+        "assets/vendor-supabase-CjvWOX37.js",
+        "assets/index.ts-bagtF5ov.js"
+      ],
+      "use_dynamic_url": false
     }
   ]
 }
