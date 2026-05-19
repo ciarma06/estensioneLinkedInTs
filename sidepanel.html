@@ -42,11 +42,19 @@
 
   <!-- Main app (hidden until authenticated) -->
   <div id="app-main" style="display:none">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
       <h2 style="margin: 0; color: #6d47f5;">Lead Library</h2>
       <div style="display:flex;gap:6px;align-items:center;">
         <button id="refresh-btn" style="cursor: pointer; padding: 6px 10px; border-radius: 10px; border: 1px solid #d9d2ff; background: #f3efff; color: #6d47f5;">🔄</button>
         <button id="auth-logout-btn" class="crm-btn crm-btn--ghost" type="button" style="font-size:11px;color:#6d47f5;">Sign out</button>
+      </div>
+    </div>
+
+    <div id="quota-indicator" class="quota-indicator" hidden>
+      <span class="quota-indicator__label">AI messages</span>
+      <span class="quota-indicator__value" id="quota-value">— / —</span>
+      <div class="quota-indicator__bar">
+        <div class="quota-indicator__fill" id="quota-fill"></div>
       </div>
     </div>
 

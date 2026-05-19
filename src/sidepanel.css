@@ -39,6 +39,80 @@
   text-align: center;
 }
 
+/* Quota indicator (AI messages) */
+
+.quota-indicator {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 6px;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+}
+
+.quota-indicator[hidden] {
+  display: none !important;
+}
+
+.quota-indicator__label {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.62);
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.quota-indicator__value {
+  justify-self: end;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.quota-indicator__value.is-exhausted {
+  color: #c0392b;
+}
+
+.quota-indicator__value.is-trial {
+  color: #6d47f5;
+}
+
+.quota-indicator__bar {
+  grid-column: 1 / -1;
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: rgba(122, 90, 248, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.quota-indicator__fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #7a5af8 0%, #6d47f5 100%);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.quota-indicator__fill.is-exhausted {
+  background: linear-gradient(90deg, #e57373 0%, #c0392b 100%);
+}
+
+.quota-indicator--trial .quota-indicator__bar {
+  display: none;
+}
+
 /* Sidepanel: value proposition (AI) */
 
 .crm-settings {

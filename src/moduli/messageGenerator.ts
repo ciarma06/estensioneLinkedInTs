@@ -6,18 +6,166 @@ import { insertAiMessageIntoComposerNear } from './messageComposer';
 import { supabase } from './supabase';
 import { getStoredAuth, isAccessStillValid, getJwt } from './authService';
 
-async function getFunctionsInvokeErrorMessage(error: unknown): Promise<string> {
-  if (!error || typeof error !== 'object') return String(error);
-  const e = error as { message?: string; context?: { json: () => Promise<unknown> } };
+const QUOTA_STORAGE_KEY = 'linky_message_quota';
+const PRICING_URL = 'https://linkyassistant.com/#pricing';
+
+type ParsedFunctionsError = {
+  status?: number;
+  body?: Record<string, unknown>;
+  message: string;
+};
+
+/**
+ * Estrae status + body + messaggio da un errore di supabase.functions.invoke.
+ * Consuma `error.context.json()` una sola volta.
+ */
+async function parseFunctionsInvokeError(error: unknown): Promise<ParsedFunctionsError> {
+  if (!error || typeof error !== 'object') return { message: String(error) };
+  const e = error as {
+    message?: string;
+    context?: { status?: number; json?: () => Promise<unknown> };
+  };
+  const status = e.context?.status;
+  let body: Record<string, unknown> | undefined;
   if (e.context && typeof e.context.json === 'function') {
     try {
-      const body = (await e.context.json()) as { error?: string };
-      if (body?.error) return body.error;
+      body = (await e.context.json()) as Record<string, unknown>;
     } catch {
       /* ignore */
     }
   }
-  return e.message ?? String(error);
+  const message =
+    (typeof body?.error === 'string' ? body.error : undefined) ??
+    e.message ??
+    String(error);
+  return { status, body, message };
+}
+
+async function persistQuotaUpdate(
+  quota: { used?: unknown; limit?: unknown } | null,
+): Promise<void> {
+  try {
+    if (!quota) {
+      // Per il trial waitlist: nessuna quota mensile, mostra UI "trial"
+      await chrome.storage.local.set({
+        [QUOTA_STORAGE_KEY]: {
+          used: null,
+          limit: null,
+          access: 'waitlist_trial',
+          plan: null,
+          checkedAt: Date.now(),
+        },
+      });
+      return;
+    }
+    const used = typeof quota.used === 'number' ? quota.used : null;
+    const limit = typeof quota.limit === 'number' ? quota.limit : null;
+    await chrome.storage.local.set({
+      [QUOTA_STORAGE_KEY]: {
+        used,
+        limit,
+        access: 'premium',
+        plan: null,
+        checkedAt: Date.now(),
+      },
+    });
+  } catch (err) {
+    console.error('[LN-EXT] quota storage update failed', err);
+  }
+}
+
+/**
+ * Mostra una modale di upgrade con un link cliccabile a `pricingUrl`.
+ * Usata per: monthly_quota_exceeded e plan = scout (no assistant access).
+ */
+function showUpgradeModal(opts: { title: string; body: string; ctaLabel?: string }): void {
+  const overlay = document.createElement('div');
+  overlay.className = 'ln-upgrade-overlay';
+  overlay.style.position = 'fixed';
+  overlay.style.inset = '0';
+  overlay.style.background = 'rgba(0,0,0,0.4)';
+  overlay.style.zIndex = '99999';
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+  overlay.style.justifyContent = 'center';
+
+  const dialog = document.createElement('div');
+  dialog.style.maxWidth = '440px';
+  dialog.style.width = '90%';
+  dialog.style.background = '#ffffff';
+  dialog.style.borderRadius = '10px';
+  dialog.style.boxShadow = '0 16px 36px rgba(0,0,0,0.22)';
+  dialog.style.padding = '20px 22px 18px';
+  dialog.style.fontFamily =
+    'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+  const title = document.createElement('h2');
+  title.textContent = opts.title;
+  title.style.fontSize = '17px';
+  title.style.margin = '0 0 8px';
+  title.style.color = '#6d47f5';
+
+  const body = document.createElement('p');
+  body.textContent = opts.body;
+  body.style.fontSize = '13px';
+  body.style.lineHeight = '1.5';
+  body.style.margin = '0 0 16px';
+  body.style.color = 'rgba(0,0,0,0.78)';
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.justifyContent = 'flex-end';
+  actions.style.gap = '8px';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.textContent = 'Close';
+  closeBtn.style.border = '1px solid rgba(0,0,0,0.14)';
+  closeBtn.style.background = '#ffffff';
+  closeBtn.style.fontSize = '13px';
+  closeBtn.style.padding = '8px 14px';
+  closeBtn.style.borderRadius = '999px';
+  closeBtn.style.cursor = 'pointer';
+
+  const upgradeLink = document.createElement('a');
+  upgradeLink.href = PRICING_URL;
+  upgradeLink.target = '_blank';
+  upgradeLink.rel = 'noopener noreferrer';
+  upgradeLink.textContent = opts.ctaLabel ?? 'Upgrade to Bundle';
+  upgradeLink.style.border = 'none';
+  upgradeLink.style.background = '#6d47f5';
+  upgradeLink.style.color = '#ffffff';
+  upgradeLink.style.fontSize = '13px';
+  upgradeLink.style.fontWeight = '700';
+  upgradeLink.style.padding = '8px 16px';
+  upgradeLink.style.borderRadius = '999px';
+  upgradeLink.style.textDecoration = 'none';
+  upgradeLink.style.cursor = 'pointer';
+
+  const cleanup = () => {
+    overlay.remove();
+    document.removeEventListener('keydown', onKeydown, true);
+  };
+  const onKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      cleanup();
+    }
+  };
+
+  closeBtn.onclick = cleanup;
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) cleanup();
+  });
+  document.addEventListener('keydown', onKeydown, true);
+
+  actions.appendChild(closeBtn);
+  actions.appendChild(upgradeLink);
+  dialog.appendChild(title);
+  dialog.appendChild(body);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  document.body.appendChild(overlay);
 }
 
 const AI_BTN_ID = 'ln-ai-generate-btn';
@@ -287,15 +435,51 @@ async function onScenarioChosen(
     });
 
     if (error) {
-      const msg = await getFunctionsInvokeErrorMessage(error);
-      const context = (error as { context?: { status?: number } }).context;
-      const status = context?.status;
+      const parsed = await parseFunctionsInvokeError(error);
+      const status = parsed.status;
+      const body = parsed.body ?? {};
+
+      // 402 — quota mensile esaurita
+      if (status === 402 && body.error === 'monthly_quota_exceeded') {
+        const limit = typeof body.limit === 'number' ? body.limit : null;
+        const used = typeof body.used === 'number' ? body.used : null;
+        // Aggiorna l'indicator: used = limit (esaurita)
+        if (used !== null && limit !== null) {
+          await persistQuotaUpdate({ used, limit });
+        }
+        const limitText = limit ?? 'all';
+        const planText = limit && limit >= 500 ? 'a higher plan' : 'Bundle for 500 messages/mo';
+        showUpgradeModal({
+          title: 'Monthly limit reached',
+          body: `You've used all ${limitText} messages for this period. Upgrade to ${planText}.`,
+          ctaLabel: 'See pricing',
+        });
+        console.error('[LN-EXT] generate-message: monthly_quota_exceeded', { used, limit });
+        closeMenu(btn, menu);
+        return;
+      }
+
+      // 401 con reason = no_assistant_in_plan → utente con plan = scout
+      if (status === 401 && body.reason === 'no_assistant_in_plan') {
+        showUpgradeModal({
+          title: 'AI messages not in your plan',
+          body:
+            'AI messages are not included in your Scout plan. Upgrade to Bundle to unlock the Assistant features.',
+          ctaLabel: 'Upgrade to Bundle',
+        });
+        console.error('[LN-EXT] generate-message: plan denial', body);
+        closeMenu(btn, menu);
+        return;
+      }
+
+      // 401 / 403 generici → sessione scaduta
       if (status === 401 || status === 403) {
         alert('Session expired or invalid access. Please sign in again from the side panel.');
         closeMenu(btn, menu);
         return;
       }
-      throw new Error(msg);
+
+      throw new Error(parsed.message);
     }
 
     const payload = data as {
@@ -303,6 +487,7 @@ async function onScenarioChosen(
       error?: string;
       dataQuality?: 'enriched' | 'limited';
       dataQualityNote?: string;
+      quota?: { used?: number; limit?: number } | null;
     } | null;
     if (payload?.error) {
       throw new Error(payload.error);
@@ -319,6 +504,11 @@ async function onScenarioChosen(
       );
     } else if (payload?.dataQuality === 'enriched') {
       console.info('[LN-EXT] generate-message: dataQuality=enriched');
+    }
+
+    // --- Refresh quota indicator (premium: { used, limit } | trial: null) ---
+    if (payload && 'quota' in payload) {
+      await persistQuotaUpdate(payload.quota ?? null);
     }
 
     const inserted = insertAiMessageIntoComposerNear(aiMessage, btn);

@@ -27,7 +27,7 @@
  */
 
 import { verifyJwt } from "../_shared/jwt.ts";
-import { resolveAccess } from "../_shared/access.ts";
+import { resolveAccess, canUseAssistant } from "../_shared/access.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { checkAndRecord } from "../_shared/rateLimit.ts";
 import { isPremiumPlus } from "../_shared/premiumPlusAllowlist.ts";
@@ -557,6 +557,103 @@ const DATA_QUALITY_LIMITED_NOTE =
   "Dati profilo limitati: messaggio generato con contesto base.";
 
 // ---------------------------------------------------------------------------
+// Quota mensile messaggi (user_credits + RPC increment_message_count)
+// ---------------------------------------------------------------------------
+
+type IncrementResult = {
+  success: boolean;
+  used: number;
+  max_limit: number;
+};
+
+/**
+ * Chiama la funzione SQL `increment_message_count(p_email)` via PostgREST RPC.
+ * Ritorna `null` se la chiamata fallisce (network / RPC error).
+ */
+async function incrementMessageCount(
+  supabaseUrl: string,
+  serviceKey: string,
+  email: string,
+): Promise<IncrementResult | null> {
+  try {
+    const res = await fetch(`${supabaseUrl}/rest/v1/rpc/increment_message_count`, {
+      method: "POST",
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_email: email }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!res.ok) {
+      console.error(
+        "[generate-message] increment_message_count HTTP",
+        res.status,
+        await res.text().catch(() => ""),
+      );
+      return null;
+    }
+
+    const raw = (await res.json()) as unknown;
+    const row = Array.isArray(raw) ? raw[0] : raw;
+    if (!row || typeof row !== "object") return null;
+    const r = row as Record<string, unknown>;
+
+    return {
+      success: r.success === true,
+      used: Number(r.used ?? 0),
+      max_limit: Number(r.max_limit ?? 0),
+    };
+  } catch (err) {
+    console.error("[generate-message] increment_message_count error:", err);
+    return null;
+  }
+}
+
+/**
+ * Rollback del counter in user_credits dopo un fallimento di Claude.
+ * Imposta `messages_used` al valore precedente all'increment.
+ */
+async function rollbackMessageCount(
+  supabaseUrl: string,
+  serviceKey: string,
+  email: string,
+  previousUsed: number,
+): Promise<void> {
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/user_credits?email=eq.${encodeURIComponent(email)}`,
+      {
+        method: "PATCH",
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          "Content-Type": "application/json",
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify({ messages_used: previousUsed }),
+        signal: AbortSignal.timeout(5000),
+      },
+    );
+    if (!res.ok) {
+      console.error(
+        "[generate-message] rollback HTTP",
+        res.status,
+        await res.text().catch(() => ""),
+      );
+      return;
+    }
+    console.warn(
+      `[generate-message] quota rollback for ${email}: messages_used → ${previousUsed}`,
+    );
+  } catch (err) {
+    console.error("[generate-message] rollback error:", err);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Handler
 // ---------------------------------------------------------------------------
 
@@ -590,27 +687,44 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: "Invalid or expired token" }, 401);
   }
 
-  // --- Access check ---
-  const accessResult = await resolveAccess(jwtPayload.email, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  if (!("daysLeft" in accessResult)) {
+  // --- Access check (plan = "assistant") ---
+  const access = await resolveAccess(
+    jwtPayload.email,
+    SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY,
+    "assistant",
+  );
+  if (!canUseAssistant(access)) {
+    const reason =
+      access.access === "premium"
+        ? "no_assistant_in_plan"
+        : access.access;
+    const planInResponse = access.access === "premium" ? access.plan : null;
     return jsonResponse(
-      { error: "Access denied", access: accessResult.access },
-      403,
+      { error: "Unauthorized", reason, plan: planInResponse },
+      401,
     );
   }
 
-  // --- Rate limiting globale: 20 calls/hour per email ---
-  const rateCheck = await checkAndRecord({
-    supabaseUrl: SUPABASE_URL,
-    serviceKey: SUPABASE_SERVICE_ROLE_KEY,
-    email: jwtPayload.email,
-    action: "generate_message",
-    maxPerWindow: 20,
-    windowSeconds: 3600,
-  });
-  if (!rateCheck.allowed) {
-    return jsonResponse({ error: "Rate limit exceeded. Try again later." }, 429);
+  // --- Rate limit orario (solo waitlist_trial) ---
+  // Premium (assistant|bundle): nessun rate limit orario, gate via quota mensile
+  // (increment_message_count viene chiamato più sotto, prima di Claude).
+  if (access.access === "waitlist_trial") {
+    const rateCheck = await checkAndRecord({
+      supabaseUrl: SUPABASE_URL,
+      serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+      email: jwtPayload.email,
+      action: "generate_message",
+      maxPerWindow: 20,
+      windowSeconds: 3600,
+    });
+    if (!rateCheck.allowed) {
+      return jsonResponse({ error: "Rate limit exceeded. Try again later." }, 429);
+    }
   }
+
+  // Tracciato fuori dal try per poter fare rollback nel catch.
+  let quotaIncrement: IncrementResult | null = null;
 
   try {
     let raw: GenerateBody;
@@ -653,20 +767,23 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: "Engage richiede premium plus." }, 403);
       }
 
-      // Rate limit aggiuntivo per engage: 10/h
-      const engageRate = await checkAndRecord({
-        supabaseUrl: SUPABASE_URL,
-        serviceKey: SUPABASE_SERVICE_ROLE_KEY,
-        email: jwtPayload.email,
-        action: "generate_message_engage",
-        maxPerWindow: 10,
-        windowSeconds: 3600,
-      });
-      if (!engageRate.allowed) {
-        return jsonResponse(
-          { error: "Engage rate limit exceeded. Try again later." },
-          429,
-        );
+      // Rate limit aggiuntivo per engage (10/h): solo per waitlist_trial.
+      // I premium sono gating dalla quota mensile.
+      if (access.access === "waitlist_trial") {
+        const engageRate = await checkAndRecord({
+          supabaseUrl: SUPABASE_URL,
+          serviceKey: SUPABASE_SERVICE_ROLE_KEY,
+          email: jwtPayload.email,
+          action: "generate_message_engage",
+          maxPerWindow: 10,
+          windowSeconds: 3600,
+        });
+        if (!engageRate.allowed) {
+          return jsonResponse(
+            { error: "Engage rate limit exceeded. Try again later." },
+            429,
+          );
+        }
       }
 
       enrichmentAttempted = true;
@@ -706,6 +823,30 @@ Deno.serve(async (req) => {
 
     const modelsToTry = uniqueModels(FALLBACK_CLAUDE_MODELS);
     const systemPrompt = buildSystemPrompt(targetLanguage, cleanInstructions || undefined);
+
+    // --- Quota mensile: increment PRIMA della chiamata a Claude (solo premium).
+    // Eventuali fallimenti successivi attivano il rollback.
+    if (access.access === "premium") {
+      quotaIncrement = await incrementMessageCount(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+        jwtPayload.email,
+      );
+      if (!quotaIncrement) {
+        return jsonResponse({ error: "Quota service unavailable. Try again." }, 503);
+      }
+      if (!quotaIncrement.success) {
+        return jsonResponse(
+          {
+            error: "monthly_quota_exceeded",
+            used: quotaIncrement.used,
+            limit: quotaIncrement.max_limit,
+          },
+          402,
+        );
+      }
+    }
+
     let data: Record<string, unknown> | null = null;
     let response: Response | null = null;
     let lastErr = "";
@@ -728,6 +869,14 @@ Deno.serve(async (req) => {
     }
 
     if (!response || !data) {
+      if (quotaIncrement?.success) {
+        await rollbackMessageCount(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
+          jwtPayload.email,
+          quotaIncrement.used - 1,
+        );
+      }
       return jsonResponse(
         { error: "Anthropic: invalid response from provider" },
         502,
@@ -736,6 +885,14 @@ Deno.serve(async (req) => {
 
     if (!response.ok) {
       const errMsg = lastErr || getAnthropicErrorMessage(data);
+      if (quotaIncrement?.success) {
+        await rollbackMessageCount(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
+          jwtPayload.email,
+          quotaIncrement.used - 1,
+        );
+      }
       return jsonResponse(
         {
           error: `Anthropic: ${errMsg}. Check CLAUDE_MODEL or use a model supported on your account.`,
@@ -752,6 +909,14 @@ Deno.serve(async (req) => {
         : "";
 
     if (!text) {
+      if (quotaIncrement?.success) {
+        await rollbackMessageCount(
+          SUPABASE_URL,
+          SUPABASE_SERVICE_ROLE_KEY,
+          jwtPayload.email,
+          quotaIncrement.used - 1,
+        );
+      }
       return jsonResponse(
         { error: `Empty or unexpected model response (${usedModel})` },
         502,
@@ -768,8 +933,28 @@ Deno.serve(async (req) => {
       }
     }
 
+    // --- Quota field nella risposta ---
+    // - waitlist_trial: null (rate limit orario, non quota mensile)
+    // - premium: { used, limit }
+    if (quotaIncrement?.success) {
+      responseBody.quota = {
+        used: quotaIncrement.used,
+        limit: quotaIncrement.max_limit,
+      };
+    } else {
+      responseBody.quota = null;
+    }
+
     return jsonResponse(responseBody);
   } catch (error) {
+    if (quotaIncrement?.success) {
+      await rollbackMessageCount(
+        SUPABASE_URL,
+        SUPABASE_SERVICE_ROLE_KEY,
+        jwtPayload.email,
+        quotaIncrement.used - 1,
+      );
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     return jsonResponse({ error: errorMessage }, 500);
   }

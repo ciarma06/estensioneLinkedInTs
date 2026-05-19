@@ -9,7 +9,7 @@ import {
   isAccessStillValid,
   type AuthState,
 } from './authService';
-import { apiListProfiles, apiDeleteProfile, apiUpdateProfile } from './apiClient';
+import { apiListProfiles, apiDeleteProfile, apiUpdateProfile, fetchMessageQuota } from './apiClient';
 import {
   LN_USER_TARGET_LANGUAGE_KEY,
   LN_USER_VALUE_PROP_KEY,
@@ -40,6 +40,130 @@ const truncate = (text: string, max = 90) => (text.length > max ? `${text.slice(
 
 let cachedProfiles: SavedProfileRow[] = [];
 let currentQuery = '';
+
+// ─── Quota indicator (AI messages) ───────────────────────────────────────────
+
+/**
+ * Stato della quota persistito in chrome.storage.local, in modo che il content
+ * script di LinkedIn (messageGenerator) possa aggiornarlo dopo ogni generazione.
+ * Il sidepanel ascolta storage.onChanged e ridisegna l'UI.
+ */
+export const QUOTA_STORAGE_KEY = 'linky_message_quota';
+
+type StoredQuota = {
+  used: number | null;
+  limit: number | null;
+  access: string;
+  plan: 'assistant' | 'scout' | 'bundle' | null;
+  checkedAt: number;
+};
+
+const isStoredQuota = (v: unknown): v is StoredQuota => {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return (
+    (typeof o.used === 'number' || o.used === null) &&
+    (typeof o.limit === 'number' || o.limit === null) &&
+    typeof o.access === 'string'
+  );
+};
+
+function renderQuotaIndicator(state: StoredQuota | null) {
+  const wrap = document.getElementById('quota-indicator');
+  const valueEl = document.getElementById('quota-value');
+  const fillEl = document.getElementById('quota-fill');
+  if (!wrap || !valueEl || !fillEl) return;
+
+  if (!state) {
+    wrap.hidden = true;
+    return;
+  }
+
+  if (state.access === 'waitlist_trial') {
+    wrap.hidden = false;
+    wrap.classList.add('quota-indicator--trial');
+    valueEl.textContent = 'Trial — 20/hour';
+    valueEl.classList.remove('is-exhausted');
+    valueEl.classList.add('is-trial');
+    (fillEl as HTMLElement).style.width = '0%';
+    fillEl.classList.remove('is-exhausted');
+    return;
+  }
+
+  if (state.used === null || state.limit === null) {
+    wrap.hidden = true;
+    return;
+  }
+
+  wrap.hidden = false;
+  wrap.classList.remove('quota-indicator--trial');
+  valueEl.classList.remove('is-trial');
+
+  const used = Math.max(0, state.used);
+  const limit = Math.max(0, state.limit);
+  valueEl.textContent = `${used} / ${limit}`;
+
+  const exhausted = limit > 0 && used >= limit;
+  if (exhausted) {
+    valueEl.classList.add('is-exhausted');
+    fillEl.classList.add('is-exhausted');
+  } else {
+    valueEl.classList.remove('is-exhausted');
+    fillEl.classList.remove('is-exhausted');
+  }
+
+  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  (fillEl as HTMLElement).style.width = `${pct}%`;
+}
+
+/**
+ * Aggiorna il quota indicator e persiste lo stato in chrome.storage.local.
+ * Esposta su window per uso da altri script in-process.
+ */
+function updateQuotaIndicator(
+  used: number | null,
+  limit: number | null,
+  meta?: { access?: string; plan?: 'assistant' | 'scout' | 'bundle' | null },
+) {
+  const state: StoredQuota = {
+    used,
+    limit,
+    access: meta?.access ?? (used === null && limit === null ? 'waitlist_trial' : 'premium'),
+    plan: meta?.plan ?? null,
+    checkedAt: Date.now(),
+  };
+  chrome.storage.local.set({ [QUOTA_STORAGE_KEY]: state }).catch(() => {
+    // storage write failed; ignore
+  });
+  renderQuotaIndicator(state);
+}
+
+declare global {
+  interface Window {
+    updateQuotaIndicator?: typeof updateQuotaIndicator;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.updateQuotaIndicator = updateQuotaIndicator;
+}
+
+async function refreshQuotaFromServer(jwt: string): Promise<void> {
+  try {
+    const q = await fetchMessageQuota(jwt);
+    const state: StoredQuota = {
+      used: q.messages_used,
+      limit: q.messages_limit,
+      access: q.access,
+      plan: q.plan,
+      checkedAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [QUOTA_STORAGE_KEY]: state });
+    renderQuotaIndicator(state);
+  } catch (err) {
+    console.error('[crm] fetchMessageQuota failed', err);
+  }
+}
 
 const copyToClipboard = async (text: string) => {
   const value = String(text ?? '');
@@ -254,6 +378,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (stored && isAccessStillValid(stored)) {
     show('app');
     initApp(stored);
+    void refreshQuotaFromServer(stored.jwt);
     return;
   }
 
@@ -320,6 +445,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       await saveAuth(result);
       show('app');
       initApp(result);
+      void refreshQuotaFromServer(result.jwt);
     } else if (result.access === 'expired_premium' || result.access === 'expired_waitlist') {
       showExpiredScreen(result.access);
     } else if (result.access === 'unauthorized') {
@@ -346,6 +472,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   // ─── Main app (called only after successful auth) ────────────────────────
 
   function initApp(_auth: AuthState) {
+    // Quota indicator: render immediately from cache, then ascolta updates
+    // scritti dal content script (messageGenerator) o da refreshQuotaFromServer.
+    chrome.storage.local.get(QUOTA_STORAGE_KEY).then((r) => {
+      const cached = r[QUOTA_STORAGE_KEY];
+      if (isStoredQuota(cached)) renderQuotaIndicator(cached);
+    });
+
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes[QUOTA_STORAGE_KEY]) return;
+      const next = changes[QUOTA_STORAGE_KEY].newValue;
+      if (isStoredQuota(next)) renderQuotaIndicator(next);
+      else if (next == null) renderQuotaIndicator(null);
+    });
+
     const loadProfiles = async () => {
       ensureSearchBar();
       const listContainer = document.getElementById('profiles-list');

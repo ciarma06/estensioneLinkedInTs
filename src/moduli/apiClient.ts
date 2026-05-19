@@ -102,3 +102,78 @@ export function apiSearchProfile(
     body: { linkedin_url: linkedinUrl },
   });
 }
+
+export type Plan = 'assistant' | 'scout' | 'bundle';
+
+export type MessageQuota = {
+  messages_used: number | null;
+  messages_limit: number | null;
+  messages_period_end: string | null;
+  plan: Plan | null;
+  access: string;
+};
+
+/**
+ * Recupera lo stato della quota mensile messaggi AI per l'utente autenticato.
+ *
+ * - Per gli utenti premium ritorna i contatori reali da `user_credits`.
+ * - Per il `waitlist_trial` i campi quota sono `null` (gate orario).
+ *
+ * Lancia `Error` con messaggio significativo per failure di rete / 5xx, in modo
+ * che il caller possa gestire la UI di errore senza dover ispezionare ApiErr.
+ */
+export async function fetchMessageQuota(jwt: string): Promise<MessageQuota> {
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/get-message-quota`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (err) {
+    console.error("[apiClient] fetchMessageQuota network error:", err);
+    throw new Error("Connection error.");
+  }
+
+  let data: Record<string, unknown> = {};
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    throw new Error("Invalid response from server.");
+  }
+
+  if (!res.ok) {
+    const msg = typeof data.error === "string" ? data.error : "Server error.";
+    const err = new Error(msg) as Error & {
+      status?: number;
+      reason?: string;
+      plan?: Plan | null;
+    };
+    err.status = res.status;
+    if (typeof data.reason === "string") err.reason = data.reason;
+    if (data.plan === null || data.plan === "assistant" || data.plan === "scout" || data.plan === "bundle") {
+      err.plan = data.plan as Plan | null;
+    }
+    throw err;
+  }
+
+  return {
+    messages_used:
+      typeof data.messages_used === "number" ? data.messages_used : null,
+    messages_limit:
+      typeof data.messages_limit === "number" ? data.messages_limit : null,
+    messages_period_end:
+      typeof data.messages_period_end === "string"
+        ? data.messages_period_end
+        : null,
+    plan:
+      data.plan === "assistant" || data.plan === "scout" || data.plan === "bundle"
+        ? (data.plan as Plan)
+        : null,
+    access: typeof data.access === "string" ? data.access : "unknown",
+  };
+}
