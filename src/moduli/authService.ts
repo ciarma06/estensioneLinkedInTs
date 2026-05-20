@@ -41,15 +41,18 @@ export async function requestOtp(email: string): Promise<RequestOtpResult> {
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (res.status === 429) {
-      return { ok: false, message: "Too many attempts. Please try again in a minute." };
-    }
-
     let data: Record<string, unknown>;
     try {
       data = (await res.json()) as Record<string, unknown>;
     } catch {
       return { ok: false, message: "Invalid response from server." };
+    }
+
+    if (res.status === 429) {
+      return {
+        ok: false,
+        message: String(data.error ?? "Too many attempts. Please try again later."),
+      };
     }
 
     if (data.ok === true) return { ok: true };
@@ -99,6 +102,13 @@ export async function verifyOtp(email: string, code: string): Promise<VerifyOtpR
       return { access: "error", message: "Incomplete response from server." };
     }
 
+    console.log('[auth] verify-otp raw response:', JSON.stringify({
+      jwt: data.jwt,
+      access: data.access,
+      expiresAt: data.expiresAt,
+      daysLeft: data.daysLeft,
+    }));
+
     const state: AuthState = {
       jwt: data.jwt as string,
       email,
@@ -107,6 +117,8 @@ export async function verifyOtp(email: string, code: string): Promise<VerifyOtpR
       daysLeft: Number(data.daysLeft ?? 0),
       checkedAt: Date.now(),
     };
+
+    console.log('[auth] verify-otp AuthState built:', JSON.stringify(state));
 
     return state;
   } catch {
@@ -131,6 +143,8 @@ export async function getStoredAuth(): Promise<AuthState | null> {
 export async function saveAuth(state: AuthState): Promise<void> {
   try {
     await chrome.storage.local.set({ [STORAGE_KEY]: state });
+    const verification = await getStoredAuth();
+    console.log('[auth] getStoredAuth() after saveAuth:', JSON.stringify(verification));
   } catch {
     // storage write failed
   }

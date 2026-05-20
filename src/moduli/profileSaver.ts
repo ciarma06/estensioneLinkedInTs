@@ -81,7 +81,7 @@ export const extractProfileFromComment = (commentElement: HTMLElement): LinkedIn
   const textElement = commentElement.querySelector(
     '[data-testid="expandable-text-box"], .update-components-text, .comments-comment-item__main-content span[dir="ltr"]',
   );
-  const comment_text = textElement?.textContent?.trim() || 'Testo non disponibile';
+  const comment_text = textElement?.textContent?.trim() || 'Comment text not available';
 
   // 3. URL del commento (deep link feed)
   let comment_url = window.location.href;

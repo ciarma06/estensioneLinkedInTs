@@ -33,11 +33,11 @@ Deno.serve(async (req) => {
     if (!token) return jsonResponse({ error: "Missing authorization" }, 401);
 
     const payload = await verifyJwt(token, JWT_SECRET);
-    if (!payload) return jsonResponse({ error: "Token non valido o scaduto" }, 401);
+    if (!payload) return jsonResponse({ error: "Invalid or expired token" }, 401);
 
     const access = await resolveAccess(payload.email, SUPABASE_URL, SERVICE_KEY);
     if (access.access !== "premium" && access.access !== "waitlist_trial") {
-      return jsonResponse({ error: "Accesso non valido", access: access.access }, 401);
+      return jsonResponse({ error: "Invalid access", access: access.access }, 401);
     }
 
     let body: {
@@ -53,7 +53,7 @@ Deno.serve(async (req) => {
     }
 
     if (!body.full_name || !body.linkedin_url) {
-      return jsonResponse({ error: "full_name e linkedin_url sono obbligatori" }, 400);
+      return jsonResponse({ error: "full_name and linkedin_url are required" }, 400);
     }
 
     const insertBody = {
@@ -85,12 +85,12 @@ Deno.serve(async (req) => {
     }
 
     if (!res.ok) {
-      return jsonResponse({ error: "Errore nel salvataggio del profilo" }, 500);
+      return jsonResponse({ error: "Failed to save profile" }, 500);
     }
 
     return jsonResponse({ profile: result });
   } catch (err) {
     console.error("[save-profile] Error:", err);
-    return jsonResponse({ error: "Errore interno" }, 500);
+    return jsonResponse({ error: "Internal error" }, 500);
   }
 });

@@ -374,7 +374,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Step 1: check stored auth
+  const rawStorage = await chrome.storage.local.get('crm_auth');
+  console.log('[auth] startup - raw chrome.storage crm_auth:', JSON.stringify(rawStorage));
   const stored = await getStoredAuth();
+  console.log('[auth] startup - getStoredAuth():', JSON.stringify(stored));
+  if (stored) {
+    console.log('[auth] startup - isAccessStillValid:', isAccessStillValid(stored), '| expiresAt:', stored.expiresAt, '| checkedAt:', stored.checkedAt, '| now:', Date.now());
+  }
   if (stored && isAccessStillValid(stored)) {
     show('app');
     initApp(stored);
@@ -531,7 +537,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const storedLanguage = String(r[LN_USER_TARGET_LANGUAGE_KEY] ?? '');
         targetLanguageSelect.value = TARGET_LANGUAGES.includes(storedLanguage as (typeof TARGET_LANGUAGES)[number])
           ? storedLanguage
-          : 'Italiano';
+          : 'Inglese';
       }
     });
     valuePropSave?.addEventListener('click', () => {
@@ -539,7 +545,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const selectedLanguage =
         targetLanguageSelect && TARGET_LANGUAGES.includes(targetLanguageSelect.value as (typeof TARGET_LANGUAGES)[number])
           ? targetLanguageSelect.value
-          : 'Italiano';
+          : 'Inglese';
       chrome.storage.local.set(
         {
           [LN_USER_VALUE_PROP_KEY]: valuePropTa.value.trim(),

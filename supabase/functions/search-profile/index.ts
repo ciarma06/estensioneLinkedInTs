@@ -61,11 +61,11 @@ Deno.serve(async (req) => {
     if (!token) return jsonResponse({ error: "Missing authorization" }, 401);
 
     const payload = await verifyJwt(token, JWT_SECRET);
-    if (!payload) return jsonResponse({ error: "Token non valido o scaduto" }, 401);
+    if (!payload) return jsonResponse({ error: "Invalid or expired token" }, 401);
 
     const access = await resolveAccess(payload.email, SUPABASE_URL, SERVICE_KEY);
     if (access.access !== "premium" && access.access !== "waitlist_trial") {
-      return jsonResponse({ error: "Accesso non valido", access: access.access }, 401);
+      return jsonResponse({ error: "Invalid access", access: access.access }, 401);
     }
 
     let body: { linkedin_url?: string };
@@ -140,6 +140,6 @@ Deno.serve(async (req) => {
     return jsonResponse({ profile: fuzzyRows[0] ?? null });
   } catch (err) {
     console.error("[search-profile] Error:", err);
-    return jsonResponse({ error: "Errore interno" }, 500);
+    return jsonResponse({ error: "Internal error" }, 500);
   }
 });

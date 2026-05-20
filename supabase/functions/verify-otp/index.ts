@@ -51,10 +51,10 @@ Deno.serve(async (req) => {
     }
 
     if (!isValidEmail(body.email)) {
-      return jsonResponse({ error: "Email non valida" }, 400);
+      return jsonResponse({ error: "Invalid email" }, 400);
     }
     if (!isValidOtp(body.code)) {
-      return jsonResponse({ error: "Codice non valido" }, 400);
+      return jsonResponse({ error: "Invalid code" }, 400);
     }
 
     const email = body.email.trim().toLowerCase();
@@ -70,7 +70,10 @@ Deno.serve(async (req) => {
       windowSeconds: 3600,
     });
     if (!rlCheck.allowed) {
-      return jsonResponse({ error: "Troppi tentativi. Riprova più tardi." }, 429);
+      return jsonResponse(
+        { error: `Too many attempts. ${rlCheck.retryMessage ?? "Please try again later."}` },
+        429,
+      );
     }
 
     const codeHash = await sha256Hex(code);
@@ -136,7 +139,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      return jsonResponse({ error: "Codice non valido o scaduto" }, 400);
+      return jsonResponse({ error: "Invalid or expired code" }, 400);
     }
 
     const matched = rows[0];
@@ -160,7 +163,7 @@ Deno.serve(async (req) => {
       access.access === "expired_premium" ||
       access.access === "expired_waitlist"
     ) {
-      return jsonResponse({ access: access.access, message: "Accesso non disponibile." }, 403);
+      return jsonResponse({ access: access.access, message: "Access not available." }, 403);
     }
 
     // Sign JWT (30 days)
@@ -175,6 +178,6 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     console.error("[verify-otp] Unexpected error:", err);
-    return jsonResponse({ error: "Errore interno. Riprova." }, 500);
+    return jsonResponse({ error: "Internal error. Please try again." }, 500);
   }
 });

@@ -6,7 +6,7 @@ export const LN_USER_AI_INSTRUCTIONS_KEY = 'ln_user_ai_instructions';
 export const TARGET_LANGUAGES = ['Italiano', 'Inglese', 'Spagnolo', 'Tedesco'] as const;
 export type TargetLanguage = (typeof TARGET_LANGUAGES)[number];
 
-const DEFAULT_TARGET_LANGUAGE: TargetLanguage = 'Italiano';
+const DEFAULT_TARGET_LANGUAGE: TargetLanguage = 'Inglese';
 
 const isTargetLanguage = (value: unknown): value is TargetLanguage => {
   return (

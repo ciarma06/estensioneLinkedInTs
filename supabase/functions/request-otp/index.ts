@@ -55,7 +55,7 @@ async function sendOtpEmail(email: string, otp: string): Promise<boolean> {
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:400px;margin:0 auto;padding:24px;">
             <h2 style="color:#6d47f5;margin-bottom:8px;">Linky Assistant</h2>
-            <p>Il tuo codice di accesso:</p>
+            <p>Your access code:</p>
             <p style="font-size:32px;font-weight:800;letter-spacing:6px;color:#6d47f5;margin:16px 0;">${otp}</p>
             <p style="font-size:13px;color:#666;">Expires in 10 minutes. Never share this code with anyone.</p>
           </div>
@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
     }
 
     if (!isValidEmail(body.email)) {
-      return jsonResponse({ error: "Email non valida" }, 400);
+      return jsonResponse({ error: "Invalid email" }, 400);
     }
 
     const email = body.email.trim().toLowerCase();
@@ -104,7 +104,10 @@ Deno.serve(async (req) => {
       windowSeconds: 3600,
     });
     if (!ipCheck.allowed) {
-      return jsonResponse({ error: "Troppi tentativi. Riprova più tardi." }, 429);
+      return jsonResponse(
+        { error: `Too many attempts. ${ipCheck.retryMessage ?? "Try again later."}` },
+        429,
+      );
     }
 
     // Rate limit per email: max 1 in 60s

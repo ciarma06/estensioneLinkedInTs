@@ -487,8 +487,13 @@ function buildUserInstruction(
     ? `- Settore / fase aziendale del lead: ${industry}`
     : "";
 
-  const base = `CONTESTO CHI SCRIVE (value proposition — usa solo questo per "noi", non inventare settori):
-${vp}
+  const vpBlock = vp
+    ? `CONTESTO CHI SCRIVE (value proposition — usa solo questo per "noi", non inventare settori):
+${vp}`
+    : `CONTESTO CHI SCRIVE (value proposition):
+Non specificata. Non inventare settori, claim, numeri o specifiche del mittente: mantieni un tono peer-to-peer generico, parla da esperienza diretta senza attribuire al mittente un settore/prodotto specifico.`;
+
+  const base = `${vpBlock}
 
 DESTINATARIO
 - Nome (se noto): ${name}
@@ -744,15 +749,6 @@ Deno.serve(async (req) => {
     }
 
     const valueProposition = (raw.valueProposition ?? "").trim();
-    if (!valueProposition) {
-      return jsonResponse(
-        {
-          error:
-            'Required field "valueProposition": set your value proposition in the extension CRM settings.',
-        },
-        400,
-      );
-    }
 
     const scenario = raw.scenario;
     const profileUrl = (raw.profileUrl ?? "").trim();
@@ -764,7 +760,7 @@ Deno.serve(async (req) => {
 
     if (scenario === "engage") {
       if (!premiumPlus) {
-        return jsonResponse({ error: "Engage richiede premium plus." }, 403);
+        return jsonResponse({ error: "Engage requires premium plus." }, 403);
       }
 
       // Rate limit aggiuntivo per engage (10/h): solo per waitlist_trial.

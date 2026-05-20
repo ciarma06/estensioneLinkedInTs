@@ -33,11 +33,11 @@ Deno.serve(async (req) => {
     if (!token) return jsonResponse({ error: "Missing authorization" }, 401);
 
     const payload = await verifyJwt(token, JWT_SECRET);
-    if (!payload) return jsonResponse({ error: "Token non valido o scaduto" }, 401);
+    if (!payload) return jsonResponse({ error: "Invalid or expired token" }, 401);
 
     const access = await resolveAccess(payload.email, SUPABASE_URL, SERVICE_KEY);
     if (access.access !== "premium" && access.access !== "waitlist_trial") {
-      return jsonResponse({ error: "Accesso non valido", access: access.access }, 401);
+      return jsonResponse({ error: "Invalid access", access: access.access }, 401);
     }
 
     let body: { id?: unknown; full_name?: string };
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     }
 
     if (!body.id) {
-      return jsonResponse({ error: "id obbligatorio" }, 400);
+      return jsonResponse({ error: "id is required" }, 400);
     }
 
     const updateFields: Record<string, unknown> = {};
@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     }
 
     if (Object.keys(updateFields).length === 0) {
-      return jsonResponse({ error: "Nessun campo da aggiornare" }, 400);
+      return jsonResponse({ error: "No fields to update" }, 400);
     }
 
     const patchUrl =
@@ -85,12 +85,12 @@ Deno.serve(async (req) => {
     }
 
     if (!rows.length) {
-      return jsonResponse({ error: "Profilo non trovato" }, 404);
+      return jsonResponse({ error: "Profile not found" }, 404);
     }
 
     return jsonResponse({ profile: rows[0] });
   } catch (err) {
     console.error("[update-profile] Error:", err);
-    return jsonResponse({ error: "Errore interno" }, 500);
+    return jsonResponse({ error: "Internal error" }, 500);
   }
 });

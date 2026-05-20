@@ -33,11 +33,11 @@ Deno.serve(async (req) => {
     if (!token) return jsonResponse({ error: "Missing authorization" }, 401);
 
     const payload = await verifyJwt(token, JWT_SECRET);
-    if (!payload) return jsonResponse({ error: "Token non valido o scaduto" }, 401);
+    if (!payload) return jsonResponse({ error: "Invalid or expired token" }, 401);
 
     const access = await resolveAccess(payload.email, SUPABASE_URL, SERVICE_KEY);
     if (access.access !== "premium" && access.access !== "waitlist_trial") {
-      return jsonResponse({ error: "Accesso non valido", access: access.access }, 401);
+      return jsonResponse({ error: "Invalid access", access: access.access }, 401);
     }
 
     let body: { id?: unknown };
@@ -48,7 +48,7 @@ Deno.serve(async (req) => {
     }
 
     if (!body.id) {
-      return jsonResponse({ error: "id obbligatorio" }, 400);
+      return jsonResponse({ error: "id is required" }, 400);
     }
 
     const deleteUrl =
@@ -77,6 +77,6 @@ Deno.serve(async (req) => {
     return jsonResponse({ ok: true, deleted: deleted.length });
   } catch (err) {
     console.error("[delete-profile] Error:", err);
-    return jsonResponse({ error: "Errore interno" }, 500);
+    return jsonResponse({ error: "Internal error" }, 500);
   }
 });
