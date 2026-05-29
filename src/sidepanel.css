@@ -113,6 +113,19 @@
   display: none;
 }
 
+.quota-indicator__renewal {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.48);
+  letter-spacing: 0.1px;
+  margin-top: -2px;
+}
+
+.quota-indicator__renewal[hidden] {
+  display: none !important;
+}
+
 /* Sidepanel: value proposition (AI) */
 
 .crm-settings {

@@ -14,7 +14,8 @@
  *
  * Body JSON atteso (allineato a messagingContext + Impostazioni estensione):
  * - scenario: "pain" | "trigger" | "engage"
- * - valueProposition: string (obbligatorio)
+ * - valueProposition: string (opzionale: se vuota, il prompt salta il blocco
+ *   "CONTESTO CHI SCRIVE" e usa un fallback peer-to-peer generico)
  * - leadName, headline, profileUrl: opzionali (header chat)
  * - triggerText, triggerUrl: opzionali (solo scenario trigger)
  * - industry, targetLanguage, aiInstructions: opzionali

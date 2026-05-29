@@ -45,6 +45,20 @@ async function persistQuotaUpdate(
   quota: { used?: unknown; limit?: unknown } | null,
 ): Promise<void> {
   try {
+    // Conserva plan / periodEnd dalla cache (vengono settati dal fetch a
+    // get-message-quota nel sidepanel): la response di generate-message non
+    // li include, quindi senza il merge li perderemmo a ogni generazione.
+    const existing = await chrome.storage.local.get(QUOTA_STORAGE_KEY);
+    const prev = (existing[QUOTA_STORAGE_KEY] ?? null) as
+      | { plan?: unknown; periodEnd?: unknown }
+      | null;
+    const prevPlan =
+      prev && (prev.plan === 'assistant' || prev.plan === 'scout' || prev.plan === 'bundle')
+        ? (prev.plan as 'assistant' | 'scout' | 'bundle')
+        : null;
+    const prevPeriodEnd =
+      prev && typeof prev.periodEnd === 'string' ? prev.periodEnd : null;
+
     if (!quota) {
       // Per il trial waitlist: nessuna quota mensile, mostra UI "trial"
       await chrome.storage.local.set({
@@ -53,20 +67,27 @@ async function persistQuotaUpdate(
           limit: null,
           access: 'waitlist_trial',
           plan: null,
+          periodEnd: null,
           checkedAt: Date.now(),
+          source: 'message-generated',
         },
       });
       return;
     }
     const used = typeof quota.used === 'number' ? quota.used : null;
     const limit = typeof quota.limit === 'number' ? quota.limit : null;
+    // `source: 'message-generated'` segnala al sidepanel di rifare un fetch
+    // a get-message-quota per aggiornare anche la data di rinnovo (che la
+    // response di generate-message non restituisce).
     await chrome.storage.local.set({
       [QUOTA_STORAGE_KEY]: {
         used,
         limit,
         access: 'premium',
-        plan: null,
+        plan: prevPlan,
+        periodEnd: prevPeriodEnd,
         checkedAt: Date.now(),
+        source: 'message-generated',
       },
     });
   } catch (err) {
@@ -395,13 +416,6 @@ async function onScenarioChosen(
     const valueProposition = await getValueProposition();
     const targetLanguage = await getTargetLanguage();
     const aiInstructions = await getUserInstructions();
-    if (!valueProposition) {
-      alert(
-        'Set your value proposition in the Lead Library panel (Who you are) and save, then try again.',
-      );
-      closeMenu(btn, menu);
-      return;
-    }
 
     const ctx = await getMessagingContext(scenario);
 

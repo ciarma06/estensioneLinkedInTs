@@ -54,7 +54,7 @@ async function sendOtpEmail(email: string, otp: string): Promise<boolean> {
         subject: "Your Linky Assistant code",
         html: `
           <div style="font-family:system-ui,sans-serif;max-width:400px;margin:0 auto;padding:24px;">
-            <h2 style="color:#6d47f5;margin-bottom:8px;">Linky Assistant</h2>
+            <h2 style="color:#6d47f5;margin-bottom:8px;">Linky</h2>
             <p>Your access code:</p>
             <p style="font-size:32px;font-weight:800;letter-spacing:6px;color:#6d47f5;margin:16px 0;">${otp}</p>
             <p style="font-size:13px;color:#666;">Expires in 10 minutes. Never share this code with anyone.</p>

@@ -50,13 +50,53 @@ let currentQuery = '';
  */
 export const QUOTA_STORAGE_KEY = 'linky_message_quota';
 
+type QuotaPlan = 'assistant' | 'scout' | 'bundle';
+
+/**
+ * `source` permette al sidepanel di distinguere le scritture fatte dal content
+ * script (`messageGenerator` dopo una generazione) da quelle fatte qui dal
+ * sidepanel stesso (refresh server). È usato per innescare un refresh della
+ * data di rinnovo dopo ogni messaggio generato senza creare loop infiniti.
+ */
 type StoredQuota = {
   used: number | null;
   limit: number | null;
   access: string;
-  plan: 'assistant' | 'scout' | 'bundle' | null;
+  plan: QuotaPlan | null;
+  periodEnd: string | null;
   checkedAt: number;
+  source?: 'refresh' | 'message-generated';
 };
+
+/**
+ * Default mensile per piano. Usato come fallback lato UI se l'Edge Function
+ * dovesse restituire `messages_limit` = 0 (es. cache stale).
+ */
+const PLAN_DEFAULT_LIMIT: Record<QuotaPlan, number> = {
+  assistant: 150,
+  bundle: 500,
+  scout: 0,
+};
+
+function resolveDisplayLimit(state: StoredQuota): number | null {
+  if (typeof state.limit === 'number' && state.limit > 0) return state.limit;
+  if (state.plan && PLAN_DEFAULT_LIMIT[state.plan] > 0) {
+    return PLAN_DEFAULT_LIMIT[state.plan];
+  }
+  return null;
+}
+
+const RENEWAL_DATE_FMT = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+});
+
+function formatRenewalDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return RENEWAL_DATE_FMT.format(d);
+}
 
 const isStoredQuota = (v: unknown): v is StoredQuota => {
   if (!v || typeof v !== 'object') return false;
@@ -68,14 +108,29 @@ const isStoredQuota = (v: unknown): v is StoredQuota => {
   );
 };
 
+function ensureRenewalEl(wrap: HTMLElement): HTMLElement {
+  let el = document.getElementById('quota-renewal');
+  if (!el) {
+    el = document.createElement('span');
+    el.id = 'quota-renewal';
+    el.className = 'quota-indicator__renewal';
+    el.hidden = true;
+    wrap.appendChild(el);
+  }
+  return el;
+}
+
 function renderQuotaIndicator(state: StoredQuota | null) {
   const wrap = document.getElementById('quota-indicator');
   const valueEl = document.getElementById('quota-value');
   const fillEl = document.getElementById('quota-fill');
   if (!wrap || !valueEl || !fillEl) return;
 
+  const renewalEl = ensureRenewalEl(wrap);
+
   if (!state) {
     wrap.hidden = true;
+    renewalEl.hidden = true;
     return;
   }
 
@@ -87,11 +142,16 @@ function renderQuotaIndicator(state: StoredQuota | null) {
     valueEl.classList.add('is-trial');
     (fillEl as HTMLElement).style.width = '0%';
     fillEl.classList.remove('is-exhausted');
+    renewalEl.hidden = true;
+    renewalEl.textContent = '';
     return;
   }
 
-  if (state.used === null || state.limit === null) {
+  const displayLimit = resolveDisplayLimit(state);
+  // Niente quota disponibile e nessun piano riconoscibile → nascondi.
+  if (state.used === null && displayLimit === null) {
     wrap.hidden = true;
+    renewalEl.hidden = true;
     return;
   }
 
@@ -99,8 +159,8 @@ function renderQuotaIndicator(state: StoredQuota | null) {
   wrap.classList.remove('quota-indicator--trial');
   valueEl.classList.remove('is-trial');
 
-  const used = Math.max(0, state.used);
-  const limit = Math.max(0, state.limit);
+  const used = Math.max(0, state.used ?? 0);
+  const limit = Math.max(0, displayLimit ?? 0);
   valueEl.textContent = `${used} / ${limit}`;
 
   const exhausted = limit > 0 && used >= limit;
@@ -114,6 +174,15 @@ function renderQuotaIndicator(state: StoredQuota | null) {
 
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
   (fillEl as HTMLElement).style.width = `${pct}%`;
+
+  const renewalText = formatRenewalDate(state.periodEnd);
+  if (renewalText) {
+    renewalEl.textContent = `Renews on ${renewalText}`;
+    renewalEl.hidden = false;
+  } else {
+    renewalEl.textContent = '';
+    renewalEl.hidden = true;
+  }
 }
 
 /**
@@ -123,14 +192,20 @@ function renderQuotaIndicator(state: StoredQuota | null) {
 function updateQuotaIndicator(
   used: number | null,
   limit: number | null,
-  meta?: { access?: string; plan?: 'assistant' | 'scout' | 'bundle' | null },
+  meta?: {
+    access?: string;
+    plan?: QuotaPlan | null;
+    periodEnd?: string | null;
+  },
 ) {
   const state: StoredQuota = {
     used,
     limit,
     access: meta?.access ?? (used === null && limit === null ? 'waitlist_trial' : 'premium'),
     plan: meta?.plan ?? null,
+    periodEnd: meta?.periodEnd ?? null,
     checkedAt: Date.now(),
+    source: 'message-generated',
   };
   chrome.storage.local.set({ [QUOTA_STORAGE_KEY]: state }).catch(() => {
     // storage write failed; ignore
@@ -149,19 +224,23 @@ if (typeof window !== 'undefined') {
 }
 
 async function refreshQuotaFromServer(jwt: string): Promise<void> {
+  console.log('[crm] fetching get-message-quota...');
   try {
     const q = await fetchMessageQuota(jwt);
+    console.log('[crm] get-message-quota response:', q);
     const state: StoredQuota = {
       used: q.messages_used,
       limit: q.messages_limit,
       access: q.access,
       plan: q.plan,
+      periodEnd: q.messages_period_end,
       checkedAt: Date.now(),
+      source: 'refresh',
     };
     await chrome.storage.local.set({ [QUOTA_STORAGE_KEY]: state });
     renderQuotaIndicator(state);
   } catch (err) {
-    console.error('[crm] fetchMessageQuota failed', err);
+    console.error('[crm] get-message-quota error:', err);
   }
 }
 
@@ -384,6 +463,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (stored && isAccessStillValid(stored)) {
     show('app');
     initApp(stored);
+    console.log(
+      '[crm] calling refreshQuotaFromServer with jwt:',
+      stored.jwt ? 'present' : 'MISSING',
+    );
     void refreshQuotaFromServer(stored.jwt);
     return;
   }
@@ -451,6 +534,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       await saveAuth(result);
       show('app');
       initApp(result);
+      console.log(
+        '[crm] calling refreshQuotaFromServer with jwt:',
+        result.jwt ? 'present' : 'MISSING',
+      );
       void refreshQuotaFromServer(result.jwt);
     } else if (result.access === 'expired_premium' || result.access === 'expired_waitlist') {
       showExpiredScreen(result.access);
@@ -488,8 +575,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== 'local' || !changes[QUOTA_STORAGE_KEY]) return;
       const next = changes[QUOTA_STORAGE_KEY].newValue;
-      if (isStoredQuota(next)) renderQuotaIndicator(next);
-      else if (next == null) renderQuotaIndicator(null);
+      if (isStoredQuota(next)) {
+        renderQuotaIndicator(next);
+        // Se la scrittura proviene da messageGenerator (post-generazione),
+        // rifacciamo subito un fetch a get-message-quota per aggiornare
+        // anche `messages_period_end` (la response di generate-message non
+        // la include). `source === 'refresh'` invece è la nostra stessa
+        // scrittura: evitiamo di triggerare un loop infinito.
+        if (next.source === 'message-generated') {
+          (async () => {
+            const fresh = await getStoredAuth();
+            if (!fresh || !isAccessStillValid(fresh)) return;
+            console.log(
+              '[crm] calling refreshQuotaFromServer with jwt:',
+              fresh.jwt ? 'present' : 'MISSING',
+              '(trigger: message-generated)',
+            );
+            await refreshQuotaFromServer(fresh.jwt);
+          })();
+        }
+      } else if (next == null) {
+        renderQuotaIndicator(null);
+      }
     });
 
     const loadProfiles = async () => {
