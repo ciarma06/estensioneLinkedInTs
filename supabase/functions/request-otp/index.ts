@@ -2,6 +2,10 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { isValidEmail } from "../_shared/validation.ts";
 import { resolveAccess } from "../_shared/access.ts";
 import { checkAndRecord } from "../_shared/rateLimit.ts";
+import {
+  getDevTestEmailWhitelist,
+  isDevBypassRequestEmail,
+} from "../_shared/devBypass.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -92,6 +96,13 @@ Deno.serve(async (req) => {
     }
 
     const email = body.email.trim().toLowerCase();
+
+    const devWhitelist = getDevTestEmailWhitelist();
+    if (isDevBypassRequestEmail(email, devWhitelist)) {
+      console.log(`[auth-bypass] dev OTP used for email=${email}`);
+      return jsonResponse({ ok: true });
+    }
+
     const ip = extractIp(req);
 
     // Rate limit per IP: max 5/hour
@@ -128,7 +139,7 @@ Deno.serve(async (req) => {
     // Check access
     const access = await resolveAccess(email, SUPABASE_URL, SERVICE_KEY);
 
-    if (access.access === "unauthorized") {
+    if (access.access === "none") {
       await fakeDelay();
       return jsonResponse({ ok: true });
     }

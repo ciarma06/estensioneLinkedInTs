@@ -64,7 +64,7 @@ Deno.serve(async (req) => {
     if (!payload) return jsonResponse({ error: "Invalid or expired token" }, 401);
 
     const access = await resolveAccess(payload.email, SUPABASE_URL, SERVICE_KEY);
-    if (access.access !== "premium" && access.access !== "waitlist_trial") {
+    if (access.access !== "premium" && access.access !== "trial") {
       return jsonResponse({ error: "Invalid access", access: access.access }, 401);
     }
 

@@ -169,13 +169,13 @@ Deno.serve(async (req) => {
     }
 
     // Waitlist trial: nessuna quota mensile (gate via rate limit orario).
-    if (access.access === "waitlist_trial") {
+    if (access.access === "trial") {
       return jsonResponse({
         messages_used: null,
         messages_limit: null,
         messages_period_end: null,
         plan: null,
-        access: "waitlist_trial",
+        access: "trial",
       });
     }
 

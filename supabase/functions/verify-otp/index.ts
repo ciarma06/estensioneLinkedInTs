@@ -3,6 +3,11 @@ import { isValidEmail, isValidOtp } from "../_shared/validation.ts";
 import { resolveAccess } from "../_shared/access.ts";
 import { checkAndRecord } from "../_shared/rateLimit.ts";
 import { signJwt } from "../_shared/jwt.ts";
+import {
+  getDevTestEmailWhitelist,
+  getDevTestOtp,
+  isDevBypassVerify,
+} from "../_shared/devBypass.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -28,6 +33,32 @@ const restHeaders = (key: string): Record<string, string> => ({
   Authorization: `Bearer ${key}`,
   "Content-Type": "application/json",
 });
+
+async function issueJwtForEmail(email: string): Promise<Response> {
+  const access = await resolveAccess(email, SUPABASE_URL, SERVICE_KEY);
+
+  if (
+    access.access === "none" ||
+    access.access === "trial_ended" ||
+    access.access === "expired"
+  ) {
+    return jsonResponse(
+      { access: access.access, message: "Access not available." },
+      403,
+    );
+  }
+
+  const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+  const jwt = await signJwt({ email, access: access.access, exp }, JWT_SECRET);
+
+  return jsonResponse({
+    jwt,
+    access: access.access,
+    plan: "plan" in access ? access.plan : null,
+    expiresAt: "expiresAt" in access ? access.expiresAt : null,
+    daysLeft: "daysLeft" in access ? access.daysLeft : null,
+  });
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -60,6 +91,9 @@ Deno.serve(async (req) => {
     const email = body.email.trim().toLowerCase();
     const code = body.code;
 
+    const devWhitelist = getDevTestEmailWhitelist();
+    const devOtp = getDevTestOtp();
+
     // Rate limit per email: max 10 attempts/hour
     const rlCheck = await checkAndRecord({
       supabaseUrl: SUPABASE_URL,
@@ -74,6 +108,11 @@ Deno.serve(async (req) => {
         { error: `Too many attempts. ${rlCheck.retryMessage ?? "Please try again later."}` },
         429,
       );
+    }
+
+    if (isDevBypassVerify(email, code, devWhitelist, devOtp)) {
+      console.log(`[auth-bypass] dev OTP used for email=${email}`);
+      return await issueJwtForEmail(email);
     }
 
     const codeHash = await sha256Hex(code);
@@ -155,27 +194,7 @@ Deno.serve(async (req) => {
       },
     );
 
-    // Resolve fresh access state
-    const access = await resolveAccess(email, SUPABASE_URL, SERVICE_KEY);
-
-    if (
-      access.access === "unauthorized" ||
-      access.access === "expired_premium" ||
-      access.access === "expired_waitlist"
-    ) {
-      return jsonResponse({ access: access.access, message: "Access not available." }, 403);
-    }
-
-    // Sign JWT (30 days)
-    const exp = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-    const jwt = await signJwt({ email, access: access.access, exp }, JWT_SECRET);
-
-    return jsonResponse({
-      jwt,
-      access: access.access,
-      expiresAt: access.expiresAt,
-      daysLeft: access.daysLeft,
-    });
+    return await issueJwtForEmail(email);
   } catch (err) {
     console.error("[verify-otp] Unexpected error:", err);
     return jsonResponse({ error: "Internal error. Please try again." }, 500);

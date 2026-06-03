@@ -715,7 +715,7 @@ Deno.serve(async (req) => {
   // --- Rate limit orario (solo waitlist_trial) ---
   // Premium (assistant|bundle): nessun rate limit orario, gate via quota mensile
   // (increment_message_count viene chiamato più sotto, prima di Claude).
-  if (access.access === "waitlist_trial") {
+  if (access.access === "trial") {
     const rateCheck = await checkAndRecord({
       supabaseUrl: SUPABASE_URL,
       serviceKey: SUPABASE_SERVICE_ROLE_KEY,
@@ -766,7 +766,7 @@ Deno.serve(async (req) => {
 
       // Rate limit aggiuntivo per engage (10/h): solo per waitlist_trial.
       // I premium sono gating dalla quota mensile.
-      if (access.access === "waitlist_trial") {
+      if (access.access === "trial") {
         const engageRate = await checkAndRecord({
           supabaseUrl: SUPABASE_URL,
           serviceKey: SUPABASE_SERVICE_ROLE_KEY,
